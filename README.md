@@ -1,5 +1,3 @@
-<!-- Begin section: Overview -->
-
 # Ruff
 
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/charliermarsh/ruff/main/assets/badge/v1.json)](https://github.com/charliermarsh/ruff)
@@ -108,8 +106,6 @@ developer of [Zulip](https://github.com/zulip/zulip):
 
 > This is just ridiculously fast... `ruff` is amazing.
 
-<!-- End section: Overview -->
-
 ## Table of Contents
 
 1. [Installation and Usage](#installation-and-usage)
@@ -164,8 +160,6 @@ developer of [Zulip](https://github.com/zulip/zulip):
 1. [License](#license)
 
 ## Installation and Usage
-
-<!-- Begin section: Installation and Usage -->
 
 ### Installation
 
@@ -222,16 +216,12 @@ Ruff also works with [pre-commit](https://pre-commit.com):
 ```yaml
 - repo: https://github.com/charliermarsh/ruff-pre-commit
   # Ruff version.
-  rev: 'v0.0.237'
+  rev: 'v0.0.236'
   hooks:
     - id: ruff
 ```
 
-<!-- End section: Installation and Usage -->
-
 ## Configuration
-
-<!-- Begin section: Configuration -->
 
 Ruff is configurable both via `pyproject.toml` and the command line. For a full list of configurable
 options, see the [API reference](#reference).
@@ -325,10 +315,7 @@ prefix, followed by three digits (e.g., `F401`). The prefix indicates that "sour
 rules is determined by the `select` and `ignore` options, which support both the full code (e.g.,
 `F401`) and the prefix (e.g., `F`).
 
-As a special-case, Ruff also supports the `ALL` code, which enables all rules. Note that some of the
-`pydocstyle` rules conflict (e.g., `D203` and `D211`) as they represent alternative docstring
-formats. Enabling `ALL` without further configuration may result in suboptimal behavior, especially
-for the `pydocstyle` plugin.
+As a special-case, Ruff also supports the `ALL` code, which enables all rules.
 
 If you're wondering how to configure Ruff, here are some **recommended guidelines**:
 
@@ -379,10 +366,10 @@ Ruff: An extremely fast Python linter.
 Usage: ruff [OPTIONS] <COMMAND>
 
 Commands:
-  check  Run Ruff on the given files or directories (default)
-  rule   Explain a rule
-  clean  Clear any caches in the current directory and any subdirectories
-  help   Print this message or the help of the given subcommand(s)
+  check    Run Ruff on the given files or directories (default)
+  explain  Explain a rule
+  clean    Clear any caches in the current directory and any subdirectories
+  help     Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help     Print help
@@ -435,6 +422,8 @@ line-length = 100
 
 All of the above rules apply equivalently to `ruff.toml` files. If Ruff detects both a `ruff.toml`
 and `pyproject.toml` file, it will defer to the `ruff.toml`.
+
+
 
 ### Python file discovery
 
@@ -511,11 +500,7 @@ Third, Ruff can _automatically add_ `noqa` directives to all failing lines. This
 migrating a new codebase to Ruff. You can run `ruff /path/to/file.py --add-noqa` to automatically
 add `noqa` directives to all failing lines, with the appropriate rule codes.
 
-<!-- End section: Configuration -->
-
 ## Supported Rules
-
-<!-- Begin section: Rules -->
 
 Regardless of the rule's origin, Ruff re-implements every rule in Rust as a first-party feature.
 
@@ -1260,11 +1245,7 @@ For more, see [tryceratops](https://pypi.org/project/tryceratops/1.1.0/) on PyPI
 
 <!-- End auto-generated sections. -->
 
-<!-- End section: Rules -->
-
 ## Editor Integrations
-
-<!-- Begin section: Editor Integrations -->
 
 ### VS Code (Official)
 
@@ -1504,11 +1485,7 @@ jobs:
         run: ruff --format=github .
 ```
 
-<!-- End section: Editor Integrations -->
-
 ## FAQ
-
-<!-- Begin section: FAQ -->
 
 ### Is Ruff compatible with Black?
 
@@ -1552,9 +1529,9 @@ natively, including:
 - [`flake8-executable`](https://pypi.org/project/flake8-executable/)
 - [`flake8-implicit-str-concat`](https://pypi.org/project/flake8-implicit-str-concat/)
 - [`flake8-import-conventions`](https://github.com/joaopalmeiro/flake8-import-conventions)
-- [`flake8-logging-format`](https://pypi.org/project/flake8-logging-format/)
+- [`flake8-logging-format](https://pypi.org/project/flake8-logging-format/)
 - [`flake8-no-pep420`](https://pypi.org/project/flake8-no-pep420)
-- [`flake8-pie`](https://pypi.org/project/flake8-pie/)
+- [`flake8-pie`](https://pypi.org/project/flake8-pie/) ([#1543](https://github.com/charliermarsh/ruff/issues/1543))
 - [`flake8-print`](https://pypi.org/project/flake8-print/)
 - [`flake8-pytest-style`](https://pypi.org/project/flake8-pytest-style/)
 - [`flake8-quotes`](https://pypi.org/project/flake8-quotes/)
@@ -1562,7 +1539,7 @@ natively, including:
 - [`flake8-simplify`](https://pypi.org/project/flake8-simplify/) ([#998](https://github.com/charliermarsh/ruff/issues/998))
 - [`flake8-super`](https://pypi.org/project/flake8-super/)
 - [`flake8-tidy-imports`](https://pypi.org/project/flake8-tidy-imports/)
-- [`flake8-type-checking`](https://pypi.org/project/flake8-type-checking/)
+- [`flake8-type-checking](https://pypi.org/project/flake8-type-checking/)
 - [`flake8-use-pathlib`](https://pypi.org/project/flake8-use-pathlib/)
 - [`isort`](https://pypi.org/project/isort/)
 - [`mccabe`](https://pypi.org/project/mccabe/)
@@ -1640,9 +1617,9 @@ Today, Ruff can be used to replace Flake8 when used with any of the following pl
 - [`flake8-executable`](https://pypi.org/project/flake8-executable/)
 - [`flake8-implicit-str-concat`](https://pypi.org/project/flake8-implicit-str-concat/)
 - [`flake8-import-conventions`](https://github.com/joaopalmeiro/flake8-import-conventions)
-- [`flake8-logging-format`](https://pypi.org/project/flake8-logging-format/)
+- [`flake8-logging-format](https://pypi.org/project/flake8-logging-format/)
 - [`flake8-no-pep420`](https://pypi.org/project/flake8-no-pep420)
-- [`flake8-pie`](https://pypi.org/project/flake8-pie/)
+- [`flake8-pie`](https://pypi.org/project/flake8-pie/) ([#1543](https://github.com/charliermarsh/ruff/issues/1543))
 - [`flake8-print`](https://pypi.org/project/flake8-print/)
 - [`flake8-pytest-style`](https://pypi.org/project/flake8-pytest-style/)
 - [`flake8-quotes`](https://pypi.org/project/flake8-quotes/)
@@ -1650,7 +1627,7 @@ Today, Ruff can be used to replace Flake8 when used with any of the following pl
 - [`flake8-simplify`](https://pypi.org/project/flake8-simplify/) ([#998](https://github.com/charliermarsh/ruff/issues/998))
 - [`flake8-super`](https://pypi.org/project/flake8-super/)
 - [`flake8-tidy-imports`](https://pypi.org/project/flake8-tidy-imports/)
-- [`flake8-type-checking`](https://pypi.org/project/flake8-type-checking/)
+- [`flake8-type-checking](https://pypi.org/project/flake8-type-checking/)
 - [`flake8-use-pathlib`](https://pypi.org/project/flake8-use-pathlib/)
 - [`mccabe`](https://pypi.org/project/mccabe/)
 - [`pandas-vet`](https://pypi.org/project/pandas-vet/)
@@ -1816,8 +1793,6 @@ unfixable = ["B", "SIM", "TRY", "RUF"]
 
 If you find a case where Ruff's autofix breaks your code, please file an Issue!
 
-<!-- End section: FAQ -->
-
 ## Contributing
 
 Contributions are welcome and hugely appreciated. To get started, check out the
@@ -1954,9 +1929,7 @@ Benchmark 1: find . -type f -name "*.py" | xargs -P 0 pyupgrade --py311-plus
 
 ## Reference
 
-<!-- Begin section: Settings -->
-
-### Top-level
+### Options
 
 <!-- Sections automatically generated by `cargo dev generate-options`. -->
 <!-- Begin auto-generated options sections. -->
@@ -3716,8 +3689,6 @@ keep-runtime-typing = true
 ---
 
 <!-- End auto-generated options sections. -->
-
-<!-- End section: Settings -->
 
 ## License
 

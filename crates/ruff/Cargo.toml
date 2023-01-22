@@ -1,25 +1,18 @@
-[workspace]
-members = [
-  "crates/*",
-  "ruff_dev",
-]
-<<<<<<< HEAD
-default-members = [".", "ruff_cli"]
 
 [package]
 name = "ruff"
-version = "0.0.237"
+version = "0.0.236"
 authors = ["Charlie Marsh <charlie.r.marsh@gmail.com>"]
 edition = "2021"
 rust-version = "1.65.0"
 documentation = "https://github.com/charliermarsh/ruff"
 homepage = "https://github.com/charliermarsh/ruff"
 repository = "https://github.com/charliermarsh/ruff"
-readme = "README.md"
+readme = "../README.md"
 license = "MIT"
 
 [lib]
-name = "ruff"
+name="ruff"
 crate-type = ["cdylib", "rlib"]
 doctest = false
 
@@ -46,7 +39,7 @@ num-traits = "0.2.15"
 once_cell = { version = "1.16.0" }
 path-absolutize = { version = "3.0.14", features = ["once_cell_cache", "use_unix_paths_on_wasm"] }
 regex = { version = "1.6.0" }
-ruff_macros = { version = "0.0.237", path = "ruff_macros" }
+ruff_macros = { path = "../ruff_macros" }
 rustc-hash = { version = "1.1.0" }
 rustpython-ast = { features = ["unparse"], git = "https://github.com/RustPython/RustPython.git", rev = "4f38cb68e4a97aeea9eb19673803a0bd5f655383" }
 rustpython-common = { git = "https://github.com/RustPython/RustPython.git", rev = "4f38cb68e4a97aeea9eb19673803a0bd5f655383" }
@@ -83,24 +76,4 @@ wasm-bindgen-test = { version = "0.3.33" }
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 criterion = { version = "0.4.0" }
-=======
-default-members = ["crates/ruff", "crates/ruff_cli"]
->>>>>>> b859c13d (refactor: Introduce crates folder)
-
-[profile.release]
-panic = "abort"
-lto = "thin"
-codegen-units = 1
-opt-level = 3
-
-[profile.dev.package.insta]
-opt-level = 3
-
-[profile.dev.package.similar]
-opt-level = 3
-
-# Reduce complexity of a parser function that would trigger a locals limit in a wasm tool.
-# https://github.com/bytecodealliance/wasm-tools/blob/b5c3d98e40590512a3b12470ef358d5c7b983b15/crates/wasmparser/src/limits.rs#L29
-[profile.dev.package.rustpython-parser]
-opt-level = 1
 
