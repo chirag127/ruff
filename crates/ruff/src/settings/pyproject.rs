@@ -89,7 +89,7 @@ pub fn find_user_settings_toml() -> Option<PathBuf> {
     // Search for a user-specific `pyproject.toml`.
     let mut path = dirs::config_dir()?;
     path.push("ruff");
-    path.push("../../../../pyproject.toml");
+    path.push("pyproject.toml");
     if path.is_file() {
         return Some(path);
     }
@@ -101,7 +101,7 @@ pub fn find_user_settings_toml() -> Option<PathBuf> {
 pub fn load_options<P: AsRef<Path>>(path: P) -> Result<Options> {
     if path.as_ref().ends_with("ruff.toml") {
         parse_ruff_toml(path)
-    } else if path.as_ref().ends_with("../../../../pyproject.toml") {
+    } else if path.as_ref().ends_with("pyproject.toml") {
         let pyproject = parse_pyproject_toml(&path).map_err(|err| {
             anyhow!(
                 "Failed to parse `{}`: {}",
