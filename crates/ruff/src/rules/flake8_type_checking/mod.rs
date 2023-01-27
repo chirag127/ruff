@@ -43,7 +43,7 @@ mod tests {
     #[test_case(Rule::TypingOnlyThirdPartyImport, Path::new("strict.py"); "strict")]
     fn strict(rule_code: Rule, path: &Path) -> Result<()> {
         let diagnostics = test_path(
-            Path::new("./resources/test/fixtures/flake8_type_checking")
+            Path::new("../../resources/test/fixtures/flake8_type_checking")
                 .join(path)
                 .as_path(),
             &settings::Settings {
@@ -61,7 +61,7 @@ mod tests {
     #[test_case(Rule::TypingOnlyThirdPartyImport, Path::new("exempt_modules.py"); "exempt_modules")]
     fn exempt_modules(rule_code: Rule, path: &Path) -> Result<()> {
         let diagnostics = test_path(
-            Path::new("./resources/test/fixtures/flake8_type_checking")
+            Path::new("../../resources/test/fixtures/flake8_type_checking")
                 .join(path)
                 .as_path(),
             &settings::Settings {

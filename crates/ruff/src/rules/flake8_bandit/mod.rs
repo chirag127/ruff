@@ -68,7 +68,7 @@ mod tests {
     #[test]
     fn check_typed_exception() -> Result<()> {
         let diagnostics = test_path(
-            Path::new("./resources/test/fixtures/flake8_bandit/S110.py"),
+            Path::new("../../resources/test/fixtures/flake8_bandit/S110.py"),
             &Settings {
                 flake8_bandit: super::settings::Settings {
                     check_typed_exception: true,
