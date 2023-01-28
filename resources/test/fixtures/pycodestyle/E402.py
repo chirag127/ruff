@@ -1,5 +1,6 @@
 """Top-level docstring."""
 
+
 __all__ = ["y"]
 __version__: str = "0.1.0"
 
@@ -9,9 +10,6 @@ try:
     import b
 except ImportError:
     pass
-else:
-    pass
-
 import c
 
 if x > 0:

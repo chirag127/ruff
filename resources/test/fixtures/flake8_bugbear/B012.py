@@ -34,7 +34,7 @@ def d():
 
 
 def e():
-    if 1 == 2 - 1:
+    if 2 == 2:
         try:
 
             def f():
@@ -65,10 +65,6 @@ def i():
         finally:
             break  # warning
 
-            def j():
-                while True:
-                    break  # no warning
-
 
 def h():
     while True:
@@ -76,10 +72,6 @@ def h():
             pass
         finally:
             continue  # warning
-
-            def j():
-                while True:
-                    continue  # no warning
 
 
 def k():

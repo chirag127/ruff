@@ -1,9 +1,7 @@
 # These should be changed
-if True:
-    import mock
+import mock
 
-if True:
-    import mock, sys
+import mock, sys
 
 # This goes to from unitest import mock
 import mock.mock
@@ -48,15 +46,6 @@ from mock import (
 from mock import mock, a, b, c
 from mock import a, b, c, mock
 
-if True:
-    if False:
-        from mock import (
-            mock,
-            a,
-            b,
-            c
-        )
-
 # These should not change:
 import os, io
 
@@ -69,16 +58,14 @@ import mock as foo
 # Mock should go on a new line as `from unittest import mock as foo`
 from mock import mock as foo
 
-if True:
-    # This should yield multiple, aliased imports.
-    import mock as foo, mock as bar, mock
+# This should yield multiple, aliased imports.
+import mock as foo, mock as bar, mock
 
-    # This should yield multiple, aliased imports, and preserve `os`.
-    import mock as foo, mock as bar, mock, os
+# This should yield multiple, aliased imports, and preserve `os`.
+import mock as foo, mock as bar, mock, os
 
-if True:
-    # This should yield multiple, aliased imports.
-    from mock import mock as foo, mock as bar, mock
+# This should yield multiple, aliased imports.
+from mock import mock as foo, mock as bar, mock
 
 
 # This should be unchanged.

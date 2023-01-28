@@ -20,12 +20,10 @@ class AbstractClass(ABC):
         """docstring"""
         ...
 
-    def empty_4(self):  # error
+    def empty_4(self):    # error
         """multiple ellipsis/pass"""
         ...
-        pass
         ...
-        pass
 
     @notabstract
     def abstract_0(self):

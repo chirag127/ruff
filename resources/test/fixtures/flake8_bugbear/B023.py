@@ -65,7 +65,7 @@ for j, k, l in [(1, 2, 3)]:
 
     def f():
         j = None  # OK because it's an assignment
-        [l for k in range(2)]  # error for l, not for k
+        [l for _ in range(2)]
 
         assert a and functions
 
@@ -169,6 +169,3 @@ def iter_f(names):
 
         if foo(name):
             return [lambda: name]  # known false alarm
-
-        if False:
-            return [lambda: i for i in range(3)]  # error

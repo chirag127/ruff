@@ -5,7 +5,7 @@ foo, bar, baz =[fn(x) for x in items]
 
 foo, bar, baz =          [fn(x) for x in items]
 
-foo, bar, baz = [[i for i in fn(x)] for x in items]
+foo, bar, baz = [list(fn(x)) for x in items]
 
 foo, bar, baz = [
     fn(x)

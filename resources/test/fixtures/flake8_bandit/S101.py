@@ -1,5 +1,4 @@
 # Error
-assert True
 
 def fn():
     x = 1

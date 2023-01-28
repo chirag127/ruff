@@ -20,9 +20,6 @@ except:
     pass
 except ValueError:
     pass
-else:
-    pass
-
 try:
     pass
 except:

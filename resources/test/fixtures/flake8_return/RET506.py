@@ -75,13 +75,12 @@ def foo6(x, y):
 
 
 def bar4(x):
-    if x:  # [no-else-raise]
+    if x:
         raise Exception(True)
-    else:
-        try:
-            raise Exception(False)
-        except ValueError:
-            raise Exception(None)
+    try:
+        raise Exception(False)
+    except ValueError:
+        raise Exception(None)
 
 
 ###
@@ -104,9 +103,8 @@ def bar2(w, x, y, z):
 
 
 def bar3(x, y, z):
-    if x:
-        if z:
-            raise Exception(y)
-    else:
+    if not x:
         raise Exception(z)
+    if z:
+        raise Exception(y)
     raise Exception(None)

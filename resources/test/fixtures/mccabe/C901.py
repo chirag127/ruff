@@ -11,8 +11,7 @@ def expr_as_statement():
 # Complexity = 1
 def sequential(n):
     k = n + 4
-    s = k + n
-    return s
+    return k + n
 
 
 # Complexity = 3
@@ -28,10 +27,7 @@ def if_elif_else_dead_path(n):
 # Complexity = 3
 def nested_ifs():
     if n > 3:
-        if n > 4:
-            return "bigger than four"
-        else:
-            return "bigger than three"
+        return "bigger than four" if n > 4 else "bigger than three"
     else:
         return "smaller than or equal to three"
 
@@ -46,16 +42,12 @@ def for_loop():
 def for_else(mylist):
     for i in mylist:
         print(i)
-    else:
-        print(None)
+    print(None)
 
 
 # Complexity = 2
 def recursive(n):
-    if n > 4:
-        return f(n - 1)
-    else:
-        return n
+    return f(n - 1) if n > 4 else n
 
 
 # Complexity = 3
@@ -114,16 +106,20 @@ class Class:
         if args:
             return
 
+
+
         class ServiceProvider:
             def a(self):
                 pass
 
             def b(self, data):
-                if not args:
-                    pass
+                pass
+
+
+
 
         class Logger:
-            def c(*args, **kwargs):
+            def c(self, **kwargs):
                 pass
 
             def error(self, message):
@@ -134,5 +130,6 @@ class Class:
 
             def exception(self):
                 pass
+
 
         return ServiceProvider(Logger())

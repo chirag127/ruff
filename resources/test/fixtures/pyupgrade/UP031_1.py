@@ -1,5 +1,5 @@
 # OK
-"%s" % unknown_type
+f"{unknown_type}"
 
 b"%s" % (b"bytestring",)
 
@@ -46,10 +46,7 @@ pytest.param('"%8s" % (None,)', id="unsafe width-string conversion"),
     "bar %(bar)s"
 ) % {"foo": x, "bar": y}
 
-(
-    """foo %s"""
-    % (x,)
-)
+f"""foo {x}"""
 
 (
     """

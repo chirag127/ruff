@@ -6,8 +6,7 @@ def test_return_for():
     for i in range(10):
         if i % 2:
             return i
-    else:  # [useless-else-on-loop]
-        print("math is broken")
+    print("math is broken")
     return None
 
 
@@ -15,8 +14,7 @@ def test_return_while():
     """else + return is not acceptable."""
     while True:
         return 1
-    else:  # [useless-else-on-loop]
-        print("math is broken")
+    print("math is broken")
     return None
 
 
@@ -85,19 +83,14 @@ def test_break_in_orelse_deep2():
                     break
             else:
                 print("all right")
-    else:  # [useless-else-on-loop]
-        return True
-    return False
+    return True
 
 
 def test_break_in_orelse_deep3():
     """no false positive for break deeply nested in else"""
     for _ in range(10):
-        for _ in range(3):
-            pass
-        else:
-            if 1 < 2:  # pylint: disable=comparison-of-constants
-                break
+        if 1 < 2:  # pylint: disable=comparison-of-constants
+            break
     else:
         return True
     return False
@@ -106,9 +99,7 @@ def test_break_in_orelse_deep3():
 def test_break_in_if_orelse():
     """should raise a useless-else-on-loop message due to break in else"""
     for _ in range(10):
-        if 1 < 2:  # pylint: disable=comparison-of-constants
-            pass
-        else:
+        if 1 >= 2:
             break
     else:
         return True

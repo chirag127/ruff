@@ -35,9 +35,9 @@ class class_:
         """Foo bar documentation."""
         ...
 
-    def overloaded_method(a):
+    def overloaded_method(self):
         """Foo bar documentation."""
-        return str(a)
+        return str(self)
 
     expect('overloaded_method',
            "D418: Function/ Method decorated with @overload"
@@ -53,7 +53,7 @@ class class_:
         return "hello"
 
     @expect('D102: Missing docstring in public method')
-    def __new__(self=None):
+    def __new__(cls):
         pass
 
     @expect('D107: Missing docstring in __init__')
@@ -406,16 +406,14 @@ def oneliner_d102(): return
 def oneliner_withdoc(): """One liner"""
 
 
-def ignored_decorator(func):   # noqa: D400,D401,D415
+def ignored_decorator(func):    # noqa: D400,D401,D415
     """Runs something"""
     func()
-    pass
 
 
-def decorator_for_test(func):   # noqa: D400,D401,D415
+def decorator_for_test(func):    # noqa: D400,D401,D415
     """Runs something"""
     func()
-    pass
 
 
 @ignored_decorator

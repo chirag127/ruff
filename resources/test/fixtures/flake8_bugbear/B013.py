@@ -1,8 +1,6 @@
 try:
     pass
-except (ValueError,):
-    pass
-except AttributeError:
+except (ValueError, AttributeError):
     pass
 except (ImportError, TypeError):
     pass

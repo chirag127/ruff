@@ -6,40 +6,23 @@ class Foo:
 
 if foo:
     """foo"""
-    pass
 
 
 def multi_statement() -> None:
     """This is a function."""
-    pass; print("hello")
+    print("hello")
 
 
-if foo:
-    pass
-else:
+if not foo:
     """bar"""
-    pass
-
-
 while True:
     pass
-else:
-    """bar"""
-    pass
-
-
-for _ in range(10):
-    pass
-else:
-    """bar"""
-    pass
-
-
+"""bar"""
+"""bar"""
 async for _ in range(10):
     pass
 else:
     """bar"""
-    pass
 
 
 def foo() -> None:
@@ -62,7 +45,6 @@ try:
     """
     buzz
     """
-    pass
 except ValueError:
     pass
 
@@ -71,29 +53,16 @@ try:
     bar()
 except ValueError:
     """bar"""
-    pass
-
-
 for _ in range(10):
     """buzz"""
-    pass
-
 async for _ in range(10):
     """buzz"""
-    pass
-
 while cond:
     """buzz"""
-    pass
-
-
 with bar:
     """buzz"""
-    pass
-
 async with bar:
     """buzz"""
-    pass
 
 
 def foo() -> None:
@@ -103,11 +72,6 @@ def foo() -> None:
 
 class Foo:
     # bar
-    pass
-
-
-if foo:
-    # foo
     pass
 
 

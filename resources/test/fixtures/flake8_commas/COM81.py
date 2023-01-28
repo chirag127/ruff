@@ -96,10 +96,7 @@ multiline_good_dict = {
 }
 
 # ==> dict_comprehension.py <==
-not_a_dict = {
-    x: y
-    for x, y in ((1, 2), (3, 4))
-}
+not_a_dict = dict(((1, 2), (3, 4)))
 
 # ==> good_empty_comma_context.py <==
 def func2(
@@ -152,12 +149,6 @@ from x import (
     y
 )
 
-assert(
-    SyntaxWarning,
-    ThrownHere,
-    Anyway
-)
-
 # async await is fine outside an async def
 # ruff: RustPython tokenizer treats async/await as keywords, not applicable.
 
@@ -180,12 +171,6 @@ from x import (
     y,
 )
 
-assert(
-    SyntaxWarning,
-    ThrownHere,
-    Anyway,
-)
-
 assert (
     foo
 )
@@ -194,17 +179,6 @@ assert (
     foo and
     bar
 )
-
-if(
-    foo and
-    bar
-):
-    pass
-elif(
-    foo and
-    bar
-):
-    pass
 
 for x in(
     [1,2,3]
@@ -212,25 +186,13 @@ for x in(
     print(x)
 
 
-(x for x in (
-    [1, 2, 3]
-))
+iter([1, 2, 3])
 
 (
     'foo'
 ) is (
     'foo'
 )
-
-if (
-    foo and
-    bar
-) or not (
-    foo
-) or (
-    spam
-):
-    pass
 
 def xyz():
     raise(

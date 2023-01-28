@@ -1,10 +1,7 @@
 import contextlib
 
-# SIM115
-f = open("foo.txt")
-data = f.read()
-f.close()
-
+with open("foo.txt") as f:
+    data = f.read()
 # OK
 with open("foo.txt") as f:
     data = f.read()

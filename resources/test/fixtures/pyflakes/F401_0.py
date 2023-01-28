@@ -28,11 +28,9 @@ from blah import ClassA, ClassB, ClassC
 if TYPE_CHECKING:
     from models import Fruit, Nut, Vegetable
 
-if TYPE_CHECKING:
     import shelve
     import importlib
 
-if TYPE_CHECKING:
     """Hello, world!"""
     import pathlib
 

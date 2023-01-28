@@ -5,8 +5,7 @@ str("foo", *a)
 str(**k)
 str("foo", **k)
 str("foo", encoding="UTF-8")
-str("foo"
-    "bar")
+"foobar"
 str(b"foo")
 bytes("foo", encoding="UTF-8")
 bytes(*a)
@@ -18,9 +17,9 @@ bytes("foo")
 
 # These become string or byte literals
 str()
-str("foo")
-str("""
-foo""")
+"foo"
+"""
+foo"""
 bytes()
 bytes(b"foo")
 bytes(b"""

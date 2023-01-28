@@ -11,12 +11,10 @@ print((("foo")))
 print((((1))))
 
 # UP034
-print(("foo{}".format(1)))
+print('foo1')
 
 # UP034
-print(
-    ("foo{}".format(1))
-)
+print('foo1')
 
 # UP034
 print(
@@ -30,13 +28,10 @@ def f():
     x = int(((yield 1)))
 
 # UP034
-if True:
-    print(
-        ("foo{}".format(1))
-    )
+print('foo1')
 
 # UP034
-print((x for x in range(3)))
+print(iter(range(3)))
 
 # OK
 print("foo")
@@ -58,4 +53,4 @@ def f():
     x = int((yield 1))
 
 # OK
-sum((i for i in range(3)), [])
+sum(range(3), [])

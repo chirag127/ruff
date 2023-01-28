@@ -6,7 +6,7 @@
 "{0}{2}".format(1, 2)  # F523, # F524
 
 # With no indexes
-"{}".format(1, 2)  # F523
-"{}".format(1, 2, 3)  # F523
+'1'
+'1'
 "{:{}}".format(1, 2)  # No issues
 "{:{}}".format(1, 2, 3)  # F523

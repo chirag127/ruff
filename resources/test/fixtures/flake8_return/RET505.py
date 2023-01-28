@@ -30,18 +30,15 @@ def foo5(x, y, z):
 def foo2(x, y, w, z):
     if x:
         a = 1
-    elif z:
-        b = 2
-    else:
-        c = 3
-
-    if x:  # [no-else-return]
         a = 1
         return y
     elif z:
         b = 2
+        b = 2
         return w
     else:
+        c = 3
+
         c = 3
         return z
 
@@ -94,22 +91,19 @@ def foo6(x, y):
 
 
 def bar4(x):
-    if x:  # [no-else-return]
+    if x:
         return True
-    else:
-        try:
-            return False
-        except ValueError:
-            return None
+    try:
+        return False
+    except ValueError:
+        return None
 
 
 ###
 # Non-error
 ###
 def bar1(x, y, z):
-    if x:
-        return y
-    return z
+    return y if x else z
 
 
 def bar2(w, x, y, z):
@@ -123,12 +117,9 @@ def bar2(w, x, y, z):
 
 
 def bar3(x, y, z):
-    if x:
-        if z:
-            return y
-    else:
+    if not x:
         return z
-    return None
+    return y if z else None
 
 
 x = 0

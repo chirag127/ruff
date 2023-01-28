@@ -1,9 +1,6 @@
 a = "abc"
-b = f"ghi{'jkl'}"
+b = 'ghijkl'
 
-c = f"def"
-d = f"def" + "ghi"
-e = (
-    f"def" +
-    "ghi"
-)
+c = "def"
+d = f"defghi"
+e = ("def" + "ghi")

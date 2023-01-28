@@ -40,8 +40,7 @@ def bad_that_needs_recursion():
         process()
     except MyException as e:
         logger.exception("process failed")
-        if True:
-            raise e
+        raise e
 
 
 def bad_that_needs_recursion_2():

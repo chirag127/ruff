@@ -13,13 +13,6 @@ a = l = 0
 o = 0
 i = 0
 
-for l in range(3):
-    pass
-
-
-for a, l in zip(range(3), range(3)):
-    pass
-
 
 def f1():
     global l

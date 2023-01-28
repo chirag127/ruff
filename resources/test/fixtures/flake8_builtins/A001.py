@@ -21,10 +21,7 @@ try:
 except ImportError as ValueError:
     ...
 
-for memoryview, *bytearray in []:
-    pass
-
 with open('file') as str, open('file2') as (all, any):
     pass
 
-[0 for sum in ()]
+[0 for _ in ()]

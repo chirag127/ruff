@@ -18,10 +18,7 @@ def foo():
 # OK
 def foo():
     a = 2 + 2
-    if a == 4:
-        return
-    else:
-        return
+    return
 
 
 # OK

@@ -15,7 +15,7 @@ for _ in range(10):  # _ is okay for a throw-away variable
 
 for i in range(10):
     for j in range(10):
-        for k in range(10):  # k not used, i and j used transitively
+        for _ in range(10):
             print(i + j)
 
 

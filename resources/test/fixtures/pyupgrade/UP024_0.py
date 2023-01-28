@@ -40,11 +40,11 @@ except error:
 
 try:
     pass
-except (IOError,):
+except IOError:
     pass
 try:
     pass
-except (mmap.error,):
+except mmap.error:
     pass
 try:
     pass

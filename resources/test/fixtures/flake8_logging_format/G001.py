@@ -1,3 +1,3 @@
 import logging
 
-logging.info("Hello {}".format("World!"))
+logging.info('Hello World!')

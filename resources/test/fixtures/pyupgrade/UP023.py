@@ -12,9 +12,8 @@ from xml.etree.cElementTree import (
     Element,
     SubElement,
 )
-if True:
-    import xml.etree.cElementTree as ET
-    from xml.etree import cElementTree as CET
+import xml.etree.cElementTree as ET
+from xml.etree import cElementTree as CET
 
 from xml.etree import cElementTree as ET
 

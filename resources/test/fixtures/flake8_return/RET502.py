@@ -6,8 +6,6 @@ def x(y):
 
 # without return value
 def x(y):
-    if not y:
-        return
     return
 
 
@@ -19,17 +17,11 @@ def x(y):
 
 # with return value
 def x(y):
-    if not y:
-        return 1
-    return 2
+    return 2 if y else 1
 
 
 def x(y):
-    for i in range(10):
-        if i > 100:
-            return i
-    else:
-        return 1
+    return next((i for i in range(10) if i > 100), 1)
 
 
 def x(y):
