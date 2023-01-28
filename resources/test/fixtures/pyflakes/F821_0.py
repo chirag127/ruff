@@ -14,7 +14,7 @@ def get_name(self):
     return self.name
 
 
-x = list()
+x = []
 
 
 def randdec(maxprec, maxexp):

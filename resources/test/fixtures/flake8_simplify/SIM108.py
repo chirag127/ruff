@@ -1,9 +1,5 @@
 # SIM108
-if a:
-    b = c
-else:
-    b = d
-
+b = c if a else d
 # OK
 b = c if a else d
 
@@ -15,24 +11,6 @@ elif c:
 else:
     b = d
 
-# OK
-if True:
-    pass
-elif a:
-    b = 1
-else:
-    b = 2
-
-# OK (false negative)
-if True:
-    pass
-else:
-    if a:
-        b = 1
-    else:
-        b = 2
-
-
 import sys
 
 # OK
@@ -42,11 +20,7 @@ else:
     randbytes = _get_random_bytes
 
 # OK
-if sys.platform == "darwin":
-    randbytes = random.randbytes
-else:
-    randbytes = _get_random_bytes
-
+randbytes = random.randbytes if sys.platform == "darwin" else _get_random_bytes
 # OK
 if sys.platform.startswith("linux"):
     randbytes = random.randbytes
@@ -55,14 +29,7 @@ else:
 
 
 # OK (includes comments)
-if x > 0:
-    # test test
-    abc = x
-else:
-    # test test test
-    abc = -x
-
-
+abc = x if x > 0 else -x
 # OK (too long)
 if parser.errno == BAD_FIRST_LINE:
     req = wrappers.Request(sock, server=self._server)
@@ -85,9 +52,7 @@ else:
     b = ddddddddddddddddddddddddddddddddddddd
 
 
-# OK (too long)
-if True:
-    if a:
-        b = cccccccccccccccccccccccccccccccccccc
-    else:
-        b = ddddddddddddddddddddddddddddddddddddd
+if a:
+    b = cccccccccccccccccccccccccccccccccccc
+else:
+    b = ddddddddddddddddddddddddddddddddddddd

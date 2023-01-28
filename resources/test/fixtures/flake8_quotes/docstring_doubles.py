@@ -35,4 +35,3 @@ class Cls:
             """
             Looks like a docstring, but in reality it isn't - only modules, classes and functions
             """
-            pass

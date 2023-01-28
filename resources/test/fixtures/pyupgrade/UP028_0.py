@@ -1,60 +1,48 @@
 def f():
-    for x in y:
-        yield x
+    yield from y
 
 
 def g():
-    for x, y in z:
-        yield (x, y)
+    yield from z
 
 
 def h():
-    for x in [1, 2, 3]:
-        yield x
+    yield from [1, 2, 3]
 
 
 def i():
-    for x in {x for x in y}:
-        yield x
+    yield from set(y)
 
 
 def j():
-    for x in (1, 2, 3):
-        yield x
+    yield from (1, 2, 3)
 
 
 def k():
-    for x, y in {3: "x", 6: "y"}:
-        yield x, y
+    yield from {3: "x", 6: "y"}
 
 
 def f():  # Comment one\n'
     # Comment two\n'
-    for x, y in {  # Comment three\n'
+    yield from {  # Comment three\n'
         3: "x",  # Comment four\n'
         # Comment five\n'
         6: "y",  # Comment six\n'
-    }:  # Comment seven\n'
-        # Comment eight\n'
-        yield x, y  # Comment nine\n'
+    }
         # Comment ten',
 
 
 def f():
-    for x, y in [{3: (3, [44, "long ss"]), 6: "y"}]:
-        yield x, y
+    yield from [{3: (3, [44, "long ss"]), 6: "y"}]
 
 
 def f():
-    for x, y in z():
-        yield x, y
+    yield from z()
 
 def f():
     def func():
         # This comment is preserved\n'
-        for x, y in z():  # Comment one\n'
-            # Comment two\n'
-            yield x, y  # Comment three\n'
+        yield from z()
             # Comment four\n'
 # Comment\n'
 def g():
@@ -62,13 +50,10 @@ def g():
 
 
 def f():
-    for x in y:
-        yield x
-    for z in x:
-        yield z
+    yield from y
+    yield from x
 
 
 def f():
-    for x, y in z():
-        yield x, y
+    yield from z()
     x = 1

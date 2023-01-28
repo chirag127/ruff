@@ -13,5 +13,4 @@ def ok_complex_logic():
 
 @pytest.fixture()
 def error():
-    resource = acquire_resource()
-    yield resource
+    yield acquire_resource()

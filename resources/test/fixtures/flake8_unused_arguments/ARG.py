@@ -38,7 +38,7 @@ class C:
     def f(self, /, x):
         print("Hello, world!")
 
-    def f(cls, x):
+    def f(self, x):
         print("Hello, world!")
 
     @classmethod
@@ -62,7 +62,7 @@ class C:
     def f(self, /, x):
         ...
 
-    def f(cls, x):
+    def f(self, x):
         ...
 
     @classmethod

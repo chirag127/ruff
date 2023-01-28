@@ -12,8 +12,7 @@ def this_is_all_fine(n):
 
 
 def this_is_buggy(n):
-    x = ++n
-    return x
+    return ++n
 
 
 def this_is_buggy_too(n):

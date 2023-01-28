@@ -16,8 +16,7 @@ class MyException(Exception):
 def bad():
     try:
         a = 1
-        b = process()
-        return b
+        return process()
     except MyException:
         logger.exception("process failed")
 

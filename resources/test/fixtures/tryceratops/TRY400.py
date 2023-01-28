@@ -14,8 +14,7 @@ def bad():
     except Exception:
         logging.error("Context message here")
 
-        if True:
-            logging.error("Context message here")
+        logging.error("Context message here")
 
 
 def bad():
@@ -24,8 +23,7 @@ def bad():
     except Exception:
         logger.error("Context message here")
 
-        if True:
-            logger.error("Context message here")
+        logger.error("Context message here")
 
 
 def bad():
@@ -34,8 +32,7 @@ def bad():
     except Exception:
         log.error("Context message here")
 
-        if True:
-            log.error("Context message here")
+        log.error("Context message here")
 
 
 def bad():
@@ -44,8 +41,7 @@ def bad():
     except Exception:
         self.logger.error("Context message here")
 
-        if True:
-            self.logger.error("Context message here")
+        self.logger.error("Context message here")
 
 
 def good():

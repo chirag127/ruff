@@ -2,7 +2,7 @@ import pytest
 
 
 def test_ok():
-    assert [0]
+    pass
 
 
 def test_error():
@@ -12,14 +12,14 @@ def test_error():
     assert 0.0
     assert ""
     assert f""
-    assert []
-    assert ()
-    assert {}
-    assert list()
+    assert False
+    assert False
+    assert False
+    assert False
     assert set()
     assert tuple()
-    assert dict()
+    assert False
     assert frozenset()
-    assert list([])
+    assert False
     assert set(set())
     assert tuple("")

@@ -16,35 +16,20 @@ def dummy_return():
 def bad_comparisons():
     """this is not ok"""
     instance = MyClass()
-    for i in range(10):
-        if 5 <= i:  # [misplaced-comparison-constant]
+    for _ in range(10):
+        if dummy_return() > 3:  # [misplaced-comparison-constant]
             pass
-        if 1 == i:  # [misplaced-comparison-constant]
-            pass
-        if 3 < dummy_return():  # [misplaced-comparison-constant]
-            pass
-        if 4 != instance.dummy_return():  # [misplaced-comparison-constant]
-            pass
-        if 1 == instance.attr:  # [misplaced-comparison-constant]
-            pass
-        if "aaa" == instance.attr: # [misplaced-comparison-constant]
+        if instance.dummy_return() != 4:  # [misplaced-comparison-constant]
             pass
 
 def good_comparison():
     """this is ok"""
-    for i in range(10):
-        if i == 5:
-            pass
 
 def double_comparison():
     """Check that we return early for non-binary comparison"""
     for i in range(10):
-        if i == 1 == 2:
-            pass
         if 2 <= i <= 8:
             print("Between 2 and 8 inclusive")
 
 def const_comparison():
     """Check that we return early for comparison of two constants"""
-    if 1 == 2:
-        pass

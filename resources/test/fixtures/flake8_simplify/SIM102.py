@@ -1,13 +1,9 @@
 # SIM102
-if a:
-    if b:
-        c
+if a and b:
+    c
 
-# SIM102
-if a:
-    if b:
-        if c:
-            d
+    if c:
+        d
 
 # SIM102
 if a:
@@ -16,29 +12,20 @@ elif b:
     if c:
         d
 
-# SIM102
 if a:
-    # Unfixable due to placement of this comment.
     if b:
         c
 
-# SIM102
-if a:
-    if b:
         # Fixable due to placement of this comment.
         c
 
-# OK
-if a:
-    if b:
         c
     else:
         d
 
 # OK
-if __name__ == "__main__":
-    if foo():
-        ...
+if __name__ == "__main__" and foo():
+    ...
 
 # OK
 if a:
@@ -47,29 +34,23 @@ if a:
         c
 
 while True:
-    # SIM102
-    if True:
-        if True:
-            """this
+    """this
 is valid"""
 
-            """the indentation on
+    """the indentation on
             this line is significant"""
 
-            "this is" \
-"allowed too"
+                "this is" \
+    "allowed too"
 
-            ("so is"
-"this for some reason")
+                ("so is"
+    "this for some reason")
 
 
-# SIM102
-if True:
-    if True:
-        """this
+"""this
 is valid"""
 
-        """the indentation on
+"""the indentation on
         this line is significant"""
 
         "this is" \
@@ -80,18 +61,18 @@ is valid"""
 
 while True:
     # SIM102
-    if node.module:
-        if node.module == "multiprocessing" or node.module.startswith(
-            "multiprocessing."
-        ):
-            print("Bad module!")
-
-# SIM102
-if node.module:
-    if node.module == "multiprocessing" or node.module.startswith(
-        "multiprocessing."
+    if node.module and (
+        node.module == "multiprocessing"
+        or node.module.startswith("multiprocessing.")
     ):
         print("Bad module!")
+
+# SIM102
+if node.module and (
+    node.module == "multiprocessing"
+    or node.module.startswith("multiprocessing.")
+):
+    print("Bad module!")
 
 
 # OK
@@ -102,21 +83,15 @@ else:
     print("bar")
 
 # OK
-if a:
-    if b:
-        if c:
-            print("foo")
-        else:
-            print("bar")
-else:
+if a and b and c:
+    print("foo")
+elif a and b or not a:
     print("bar")
-
 # OK
 if a:
     # SIM 102
-    if b:
-        if c:
-            print("foo")
+    if b and c:
+        print("foo")
 else:
     print("bar")
 

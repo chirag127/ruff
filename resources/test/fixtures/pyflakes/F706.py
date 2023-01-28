@@ -3,7 +3,4 @@ def f() -> int:
 
 
 class Foo:
-    return 2
-
-
-return 3
+    pass

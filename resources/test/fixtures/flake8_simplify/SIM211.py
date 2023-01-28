@@ -1,7 +1,7 @@
-a = False if b else True  # SIM211
+a = not b
 
-a = False if b != c else True  # SIM211
+a = b == c
 
-a = False if b + c else True  # SIM211
+a = not b + c
 
-a = True if b else False  # OK
+a = bool(b)

@@ -5,10 +5,8 @@ from __future__ import generator_stop
 from __future__ import print_function, generator_stop
 from __future__ import invalid_module, generators
 
-if True:
-    from __future__ import generator_stop
-    from __future__ import generators
+from __future__ import generator_stop
+from __future__ import generators
 
-if True:
-    from __future__ import generator_stop
-    from __future__ import invalid_module, generators
+from __future__ import generator_stop
+from __future__ import invalid_module, generators

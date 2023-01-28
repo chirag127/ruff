@@ -38,4 +38,4 @@ class Test(unittest.TestCase):
         return super().tearDown()
 
     def testTest(self):
-        assert True
+        pass

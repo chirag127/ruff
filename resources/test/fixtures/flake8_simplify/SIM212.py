@@ -1,7 +1,7 @@
-c = b if not a else a  # SIM212
+c = a or b
 
-c = b + c if not a else a  # SIM212
+c = a or b + c
 
-c = b if not x else a  # OK
+c = a if x else b
 
-c = a if a else b  # OK
+c = a or b

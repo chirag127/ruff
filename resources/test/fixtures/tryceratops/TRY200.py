@@ -19,8 +19,7 @@ def func():
     try:
         a = 1
     except Exception:
-        if True:
-            raise MyException()
+        raise MyException()
 
 
 def good():

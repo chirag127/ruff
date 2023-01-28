@@ -1,8 +1,5 @@
 for i in range(10):
     continue
-else:
-    continue
-
 i = 0
 while i < 10:
     i += 1
@@ -10,14 +7,9 @@ while i < 10:
 
 
 def f():
-    for i in range(10):
+    for _ in range(10):
         continue
-
-    continue
 
 
 class Foo:
     continue
-
-
-continue

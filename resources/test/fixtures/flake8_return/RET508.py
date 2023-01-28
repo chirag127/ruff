@@ -3,9 +3,7 @@
 ###
 def foo2(x, y, w, z):
     for i in x:
-        if i > y:  # [no-else-break]
-            break
-        elif i > w:
+        if i > y or i > w:  # [no-else-break]
             break
         else:
             a = z
@@ -40,13 +38,12 @@ def foo3(x, y, z):
             a = 1
             if z:  # [no-else-break]
                 b = 2
-                break
             else:
                 c = 3
-                break
         else:
             d = 4
-            break
+
+        break
 
 
 def foo4(x, y):
@@ -76,14 +73,13 @@ def foo6(x, y):
 
 
 def bar4(x):
-    for i in range(10):
-        if x:  # [no-else-break]
+    for _ in range(10):
+        if x:
             break
-        else:
-            try:
-                return
-            except ValueError:
-                break
+        try:
+            return
+        except ValueError:
+            break
 
 
 ###
@@ -109,11 +105,10 @@ def bar2(w, x, y, z):
 
 def bar3(x, y, z):
     for i in x:
-        if i > y:
-            if z:
-                break
-        else:
+        if i <= y:
             return z
+        if z:
+            break
         return None
 
 
@@ -130,9 +125,7 @@ def nested1(x, y, z):
 def nested2(x, y, z):
     for i in x:
         if i > x:
-            for j in y:
-                if j > z:
-                    break
+            for _ in y:
                 break
         else:
             a = z

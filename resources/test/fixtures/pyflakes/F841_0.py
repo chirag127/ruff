@@ -56,7 +56,7 @@ def f():
 
 def f():
     annotations = []
-    assert len([annotations for annotations in annotations])
+    assert len(list(annotations))
 
 
 def f():

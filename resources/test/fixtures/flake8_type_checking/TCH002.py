@@ -117,10 +117,7 @@ def f():
 
     from pandas import y
 
-    if TYPE_CHECKING:
-        _type = x
-    else:
-        _type = y
+    _type = x if TYPE_CHECKING else y
 
 
 def f():
@@ -128,10 +125,7 @@ def f():
 
     from pandas import y
 
-    if TYPE_CHECKING:
-        _type = x
-    elif True:
-        _type = y
+    _type = x if TYPE_CHECKING else y
 
 
 def f():

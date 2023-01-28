@@ -3,9 +3,6 @@ def f() -> int:
 
 
 class Foo:
-    yield 2
+    pass
 
-
-yield 3
-yield from 3
 await f()

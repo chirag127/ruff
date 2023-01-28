@@ -3,7 +3,7 @@ import unittest
 
 class Test(unittest.TestCase):
     def test_xxx(self):
-        assert 1 == 1  # OK no parameters
+        pass
 
     def test_assert_true(self):
         expr = 1

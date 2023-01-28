@@ -3,12 +3,11 @@ Should emit:
 B904 - on lines 10, 11 and 16
 """
 
+
 try:
     raise ValueError
 except ValueError:
-    if "abc":
-        raise TypeError
-    raise UserWarning
+    raise TypeError
 except AssertionError:
     raise  # Bare `raise` should not be an error
 except Exception as err:

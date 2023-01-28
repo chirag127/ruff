@@ -3,9 +3,7 @@
 ###
 def foo2(x, y, w, z):
     for i in x:
-        if i < y:  # [no-else-continue]
-            continue
-        elif i < w:
+        if i < y or i < w:  # [no-else-continue]
             continue
         else:
             a = z
@@ -43,13 +41,12 @@ def foo3(x, y, z):
             a = 1
             if z:  # [no-else-continue]
                 b = 2
-                continue
             else:
                 c = 3
-                continue
         else:
             d = 4
-            continue
+
+        continue
 
 
 def foo4(x, y):
@@ -79,10 +76,8 @@ def foo6(x, y):
 
 
 def bar4(x):
-    for i in range(10):
-        if x:  # [no-else-continue]
-            continue
-        else:
+    for _ in range(10):
+        if not x:
             try:
                 return
             except ValueError:
@@ -98,9 +93,8 @@ def bar1(x, y, z):
 
 def bar3(x, y, z):
     for i in x:
-        if i < y:
-            if z:
-                continue
-        else:
+        if i >= y:
             return z
+        if z:
+            continue
         return None

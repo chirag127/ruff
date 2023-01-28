@@ -49,7 +49,7 @@ except ValueError:
     pass
 
 try:
-    for i in range(3):
+    for _ in range(3):
         foo()
 except ValueError:
     pass

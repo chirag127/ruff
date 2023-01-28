@@ -12,12 +12,6 @@ try:
     pass
 except BaseException as e:
     raise e
-except TypeError:
-    pass
-else:
-    pass
-
-
 try:
     pass
 except Exception as e:

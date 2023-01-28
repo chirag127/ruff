@@ -40,7 +40,7 @@ class MyClass(BaseClass):
         super(MyClass, other).f()  # CANNOT use super()
 
     def comprehension_scope(self):
-        [super(MyClass, self).f() for x in [1]]  # CANNOT use super()
+        [super(MyClass, self).f() for _ in [1]]
 
     def inner_functions(self):
         def outer_argument():

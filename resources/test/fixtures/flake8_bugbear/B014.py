@@ -3,12 +3,13 @@ Should emit:
 B014 - on lines 11, 17, 28, 42, 49, 56, and 74.
 """
 
+
 import binascii
 import re
 
 try:
     pass
-except (Exception, TypeError):
+except Exception:
     # TypeError is a subclass of Exception, so it doesn't add anything
     pass
 

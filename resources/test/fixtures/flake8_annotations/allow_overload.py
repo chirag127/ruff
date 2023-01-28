@@ -26,8 +26,8 @@ def bar(i: "str") -> "str":
 
 
 class X:
-    def bar(i):
-        return i
+    def bar(self):
+        return self
 
 
 # TODO(charlie): This third case should raise an error (as in Mypy), because we have a

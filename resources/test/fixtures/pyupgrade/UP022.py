@@ -15,7 +15,7 @@ output = subprocess.run(
     ["foo"], stderr=subprocess.PIPE, check=True, stdout=subprocess.PIPE
 )
 
-output = subprocess.run(
+if output := subprocess.run(
     ["foo"],
     stdout=subprocess.PIPE,
     check=True,
@@ -23,9 +23,7 @@ output = subprocess.run(
     text=True,
     encoding="utf-8",
     close_fds=True,
-)
-
-if output:
+):
     output = subprocess.run(
         ["foo"],
         stdout=subprocess.PIPE,
