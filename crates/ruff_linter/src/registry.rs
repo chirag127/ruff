@@ -64,9 +64,6 @@ pub enum Linter {
     /// [flake8-async](https://pypi.org/project/flake8-async/)
     #[prefix = "ASYNC"]
     Flake8Async,
-    /// [flake8-trio](https://pypi.org/project/flake8-trio/)
-    #[prefix = "TRIO"]
-    Flake8Trio,
     /// [flake8-bandit](https://pypi.org/project/flake8-bandit/)
     #[prefix = "S"]
     Flake8Bandit,
@@ -246,7 +243,7 @@ impl Rule {
     pub const fn lint_source(&self) -> LintSource {
         match self {
             Rule::InvalidPyprojectToml => LintSource::PyprojectToml,
-            Rule::UnusedNOQA => LintSource::Noqa,
+            Rule::BlanketNOQA | Rule::RedirectedNOQA | Rule::UnusedNOQA => LintSource::Noqa,
             Rule::BidirectionalUnicode
             | Rule::BlankLineWithWhitespace
             | Rule::DocLineTooLong
@@ -256,7 +253,6 @@ impl Rule {
             | Rule::MixedSpacesAndTabs
             | Rule::TrailingWhitespace => LintSource::PhysicalLines,
             Rule::AmbiguousUnicodeCharacterComment
-            | Rule::BlanketNOQA
             | Rule::BlanketTypeIgnore
             | Rule::BlankLineAfterDecorator
             | Rule::BlankLineBetweenMethods
@@ -271,7 +267,6 @@ impl Rule {
             | Rule::InvalidCharacterNul
             | Rule::InvalidCharacterSub
             | Rule::InvalidCharacterZeroWidthSpace
-            | Rule::InvalidEscapeSequence
             | Rule::InvalidTodoCapitalization
             | Rule::InvalidTodoTag
             | Rule::LineContainsFixme

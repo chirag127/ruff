@@ -27,6 +27,7 @@ mod tests {
     #[test_case(Rule::SliceCopy, Path::new("FURB145.py"))]
     #[test_case(Rule::UnnecessaryEnumerate, Path::new("FURB148.py"))]
     #[test_case(Rule::MathConstant, Path::new("FURB152.py"))]
+    #[test_case(Rule::RepeatedGlobal, Path::new("FURB154.py"))]
     #[test_case(Rule::VerboseDecimalConstructor, Path::new("FURB157.py"))]
     #[test_case(Rule::UnnecessaryFromFloat, Path::new("FURB164.py"))]
     #[test_case(Rule::PrintEmptyString, Path::new("FURB105.py"))]
@@ -42,6 +43,8 @@ mod tests {
     #[test_case(Rule::HashlibDigestHex, Path::new("FURB181.py"))]
     #[test_case(Rule::ListReverseCopy, Path::new("FURB187.py"))]
     #[test_case(Rule::WriteWholeFile, Path::new("FURB103.py"))]
+    #[test_case(Rule::FStringNumberFormat, Path::new("FURB116.py"))]
+    #[test_case(Rule::SortedMinMax, Path::new("FURB192.py"))]
     fn rules(rule_code: Rule, path: &Path) -> Result<()> {
         let snapshot = format!("{}_{}", rule_code.noqa_code(), path.to_string_lossy());
         let diagnostics = test_path(

@@ -18,8 +18,8 @@ use crate::checkers::ast::Checker;
 /// readers than providing arguments by name.
 ///
 /// Consider refactoring functions with many arguments into smaller functions
-/// with fewer arguments, using objects to group related arguments, or
-/// migrating to keyword-only arguments.
+/// with fewer arguments, using objects to group related arguments, or migrating to
+/// [keyword-only arguments](https://docs.python.org/3/tutorial/controlflow.html#special-parameters).
 ///
 /// ## Example
 /// ```python
@@ -62,14 +62,14 @@ pub(crate) fn too_many_positional(checker: &mut Checker, function_def: &ast::Stm
     // Count the number of positional arguments.
     let num_positional_args = function_def
         .parameters
-        .args
+        .posonlyargs
         .iter()
-        .chain(&function_def.parameters.posonlyargs)
-        .filter(|arg| {
+        .chain(&function_def.parameters.args)
+        .filter(|param| {
             !checker
                 .settings
                 .dummy_variable_rgx
-                .is_match(&arg.parameter.name)
+                .is_match(&param.parameter.name)
         })
         .count();
 

@@ -1,4 +1,5 @@
 use lsp_types::ClientCapabilities;
+use ruff_linter::display_settings;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[allow(clippy::struct_excessive_bools)]
@@ -7,6 +8,7 @@ pub(crate) struct ResolvedClientCapabilities {
     pub(crate) apply_edit: bool,
     pub(crate) document_changes: bool,
     pub(crate) workspace_refresh: bool,
+    pub(crate) pull_diagnostics: bool,
 }
 
 impl ResolvedClientCapabilities {
@@ -48,12 +50,36 @@ impl ResolvedClientCapabilities {
             .unwrap_or_default();
         */
 
+        let pull_diagnostics = client_capabilities
+            .text_document
+            .as_ref()
+            .and_then(|text_document| text_document.diagnostic.as_ref())
+            .is_some();
+
         Self {
             code_action_deferred_edit_resolution: code_action_data_support
                 && code_action_edit_resolution,
             apply_edit,
             document_changes,
             workspace_refresh,
+            pull_diagnostics,
         }
+    }
+}
+
+impl std::fmt::Display for ResolvedClientCapabilities {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        display_settings! {
+            formatter = f,
+            namespace = "capabilities",
+            fields = [
+                self.code_action_deferred_edit_resolution,
+                self.apply_edit,
+                self.document_changes,
+                self.workspace_refresh,
+                self.pull_diagnostics,
+            ]
+        };
+        Ok(())
     }
 }

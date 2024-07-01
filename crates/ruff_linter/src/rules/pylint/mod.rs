@@ -39,10 +39,6 @@ mod tests {
     #[test_case(Rule::CollapsibleElseIf, Path::new("collapsible_else_if.py"))]
     #[test_case(Rule::CompareToEmptyString, Path::new("compare_to_empty_string.py"))]
     #[test_case(Rule::ComparisonOfConstant, Path::new("comparison_of_constant.py"))]
-    #[test_case(
-        Rule::RepeatedIsinstanceCalls,
-        Path::new("repeated_isinstance_calls.py")
-    )]
     #[test_case(Rule::ComparisonWithItself, Path::new("comparison_with_itself.py"))]
     #[test_case(Rule::EqWithoutHash, Path::new("eq_without_hash.py"))]
     #[test_case(Rule::EmptyComment, Path::new("empty_comment.py"))]
@@ -77,6 +73,19 @@ mod tests {
     #[test_case(Rule::InvalidAllFormat, Path::new("invalid_all_format.py"))]
     #[test_case(Rule::InvalidAllObject, Path::new("invalid_all_object.py"))]
     #[test_case(Rule::InvalidBoolReturnType, Path::new("invalid_return_type_bool.py"))]
+    #[test_case(
+        Rule::InvalidBytesReturnType,
+        Path::new("invalid_return_type_bytes.py")
+    )]
+    #[test_case(
+        Rule::InvalidIndexReturnType,
+        Path::new("invalid_return_type_index.py")
+    )]
+    #[test_case(Rule::InvalidHashReturnType, Path::new("invalid_return_type_hash.py"))]
+    #[test_case(
+        Rule::InvalidLengthReturnType,
+        Path::new("invalid_return_type_length.py")
+    )]
     #[test_case(Rule::InvalidStrReturnType, Path::new("invalid_return_type_str.py"))]
     #[test_case(Rule::DuplicateBases, Path::new("duplicate_bases.py"))]
     #[test_case(Rule::InvalidCharacterBackspace, Path::new("invalid_characters.py"))]
@@ -182,6 +191,7 @@ mod tests {
     #[test_case(Rule::SuperWithoutBrackets, Path::new("super_without_brackets.py"))]
     #[test_case(Rule::SelfOrClsAssignment, Path::new("self_or_cls_assignment.py"))]
     #[test_case(Rule::TooManyNestedBlocks, Path::new("too_many_nested_blocks.py"))]
+    #[test_case(Rule::DictIndexMissingItems, Path::new("dict_index_missing_items.py"))]
     #[test_case(Rule::DictIterMissingItems, Path::new("dict_iter_missing_items.py"))]
     #[test_case(
         Rule::UnnecessaryDictIndexLookup,
@@ -212,17 +222,6 @@ mod tests {
             },
         )?;
         assert_messages!(snapshot, diagnostics);
-        Ok(())
-    }
-
-    #[test]
-    fn repeated_isinstance_calls() -> Result<()> {
-        let diagnostics = test_path(
-            Path::new("pylint/repeated_isinstance_calls.py"),
-            &LinterSettings::for_rule(Rule::RepeatedIsinstanceCalls)
-                .with_target_version(PythonVersion::Py39),
-        )?;
-        assert_messages!(diagnostics);
         Ok(())
     }
 

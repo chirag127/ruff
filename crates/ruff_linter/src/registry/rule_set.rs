@@ -1,7 +1,9 @@
-use crate::registry::Rule;
-use ruff_macros::CacheKey;
 use std::fmt::{Debug, Display, Formatter};
 use std::iter::FusedIterator;
+
+use ruff_macros::CacheKey;
+
+use crate::registry::Rule;
 
 const RULESET_SIZE: usize = 14;
 
@@ -207,6 +209,15 @@ impl RuleSet {
         *self = set.union(&RuleSet::from_rule(rule));
     }
 
+    #[inline]
+    pub fn set(&mut self, rule: Rule, enabled: bool) {
+        if enabled {
+            self.insert(rule);
+        } else {
+            self.remove(rule);
+        }
+    }
+
     /// Removes `rule` from the set.
     ///
     /// ## Examples
@@ -291,7 +302,9 @@ impl Display for RuleSet {
         } else {
             writeln!(f, "[")?;
             for rule in self {
-                writeln!(f, "\t{rule:?},")?;
+                let name = rule.as_ref();
+                let code = rule.noqa_code();
+                writeln!(f, "\t{name} ({code}),")?;
             }
             write!(f, "]")?;
         }
@@ -356,7 +369,7 @@ impl Iterator for RuleSetIterator {
                 let rule_value = self.index * RuleSet::SLICE_BITS + bit;
                 // SAFETY: RuleSet guarantees that only valid rules are stored in the set.
                 #[allow(unsafe_code)]
-                return Some(unsafe { std::mem::transmute(rule_value) });
+                return Some(unsafe { std::mem::transmute::<u16, Rule>(rule_value) });
             }
 
             self.index += 1;
@@ -376,8 +389,9 @@ impl FusedIterator for RuleSetIterator {}
 
 #[cfg(test)]
 mod tests {
-    use crate::registry::{Rule, RuleSet};
     use strum::IntoEnumIterator;
+
+    use crate::registry::{Rule, RuleSet};
 
     /// Tests that the set can contain all rules
     #[test]

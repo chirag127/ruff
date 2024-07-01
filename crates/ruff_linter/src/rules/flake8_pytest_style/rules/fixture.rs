@@ -8,7 +8,7 @@ use ruff_python_ast::name::UnqualifiedName;
 use ruff_python_ast::visitor;
 use ruff_python_ast::visitor::Visitor;
 use ruff_python_ast::Decorator;
-use ruff_python_ast::{self as ast, Expr, ParameterWithDefault, Parameters, Stmt};
+use ruff_python_ast::{self as ast, Expr, Parameters, Stmt};
 use ruff_python_semantic::analyze::visibility::is_abstract;
 use ruff_python_semantic::SemanticModel;
 use ruff_text_size::Ranged;
@@ -33,6 +33,9 @@ use super::helpers::{
 ///
 /// Either removing those unnecessary parentheses _or_ requiring them for all
 /// fixtures is fine, but it's best to be consistent.
+///
+/// In [preview], this rule defaults to removing unnecessary parentheses, to match
+/// the behavior of official pytest projects.
 ///
 /// ## Example
 /// ```python
@@ -59,6 +62,8 @@ use super::helpers::{
 ///
 /// ## References
 /// - [`pytest` documentation: API Reference: Fixtures](https://docs.pytest.org/en/latest/reference/reference.html#fixtures-api)
+///
+/// [preview]: https://docs.astral.sh/ruff/preview/
 #[violation]
 pub struct PytestFixtureIncorrectParenthesesStyle {
     expected: Parentheses,
@@ -841,28 +846,17 @@ fn check_fixture_returns(
 
 /// PT019
 fn check_test_function_args(checker: &mut Checker, parameters: &Parameters) {
-    parameters
-        .posonlyargs
-        .iter()
-        .chain(&parameters.args)
-        .chain(&parameters.kwonlyargs)
-        .for_each(
-            |ParameterWithDefault {
-                 parameter,
-                 default: _,
-                 range: _,
-             }| {
-                let name = &parameter.name;
-                if name.starts_with('_') {
-                    checker.diagnostics.push(Diagnostic::new(
-                        PytestFixtureParamWithoutValue {
-                            name: name.to_string(),
-                        },
-                        parameter.range(),
-                    ));
-                }
-            },
-        );
+    for parameter in parameters.iter_non_variadic_params() {
+        let name = &parameter.parameter.name;
+        if name.starts_with('_') {
+            checker.diagnostics.push(Diagnostic::new(
+                PytestFixtureParamWithoutValue {
+                    name: name.to_string(),
+                },
+                parameter.range(),
+            ));
+        }
+    }
 }
 
 /// PT020

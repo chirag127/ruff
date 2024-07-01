@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use ruff_diagnostics::{AlwaysFixableViolation, Diagnostic, DiagnosticKind, Edit, Fix};
 use ruff_macros::{derive_message_formats, violation};
+use ruff_python_ast::name::Name;
 use ruff_python_ast::{self as ast, Expr, Stmt};
 use ruff_python_trivia::indentation_at_offset;
 use ruff_text_size::{Ranged, TextRange};
@@ -101,7 +102,7 @@ fn get_undecorated_methods(checker: &mut Checker, class_stmt: &Stmt, method_type
         return;
     };
 
-    let mut explicit_decorator_calls: HashMap<String, &Stmt> = HashMap::default();
+    let mut explicit_decorator_calls: HashMap<Name, &Stmt> = HashMap::default();
 
     let (method_name, diagnostic_type): (&str, DiagnosticKind) = match method_type {
         MethodType::Classmethod => ("classmethod", NoClassmethodDecorator.into()),
@@ -116,7 +117,7 @@ fn get_undecorated_methods(checker: &mut Checker, class_stmt: &Stmt, method_type
             }) = value.as_ref()
             {
                 if let Expr::Name(ast::ExprName { id, .. }) = func.as_ref() {
-                    if id == method_name && checker.semantic().is_builtin(method_name) {
+                    if id == method_name && checker.semantic().has_builtin_binding(method_name) {
                         if arguments.args.len() != 1 {
                             continue;
                         }
@@ -152,14 +153,14 @@ fn get_undecorated_methods(checker: &mut Checker, class_stmt: &Stmt, method_type
             ..
         }) = stmt
         {
-            let Some(decorator_call_statement) = explicit_decorator_calls.get(name.as_str()) else {
+            let Some(decorator_call_statement) = explicit_decorator_calls.get(name.id()) else {
                 continue;
             };
 
             // if we find the decorator we're looking for, skip
             if decorator_list.iter().any(|decorator| {
                 if let Expr::Name(ast::ExprName { id, .. }) = &decorator.expression {
-                    if id == method_name && checker.semantic().is_builtin(method_name) {
+                    if id == method_name && checker.semantic().has_builtin_binding(method_name) {
                         return true;
                     }
                 }
