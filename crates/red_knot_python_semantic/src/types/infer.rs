@@ -62,11 +62,11 @@ use crate::types::mro::MroErrorKind;
 use crate::types::unpacker::{UnpackResult, Unpacker};
 use crate::types::{
     bindings_ty, builtins_symbol, declarations_ty, global_symbol, symbol, todo_type,
-    typing_extensions_symbol, Boundness, Class, ClassLiteralType, FunctionType, InstanceType,
-    IntersectionBuilder, IntersectionType, IterationOutcome, KnownClass, KnownFunction,
-    KnownInstanceType, MetaclassCandidate, MetaclassErrorKind, SliceLiteralType, Symbol,
-    Truthiness, TupleType, Type, TypeAliasType, TypeArrayDisplay, TypeVarBoundOrConstraints,
-    TypeVarInstance, UnionBuilder, UnionType,
+    typing_extensions_symbol, Boundness, CallDunderResult, Class, ClassLiteralType, FunctionType,
+    InstanceType, IntersectionBuilder, IntersectionType, IterationOutcome, KnownClass,
+    KnownFunction, KnownInstanceType, MetaclassCandidate, MetaclassErrorKind, SliceLiteralType,
+    Symbol, Truthiness, TupleType, Type, TypeAliasType, TypeArrayDisplay,
+    TypeVarBoundOrConstraints, TypeVarInstance, UnionBuilder, UnionType,
 };
 use crate::unpack::Unpack;
 use crate::util::subscript::{PyIndex, PySlice};
@@ -74,7 +74,8 @@ use crate::Db;
 
 use super::context::{InferContext, WithDiagnostics};
 use super::diagnostic::{
-    report_index_out_of_bounds, report_invalid_exception_caught, report_non_subscriptable,
+    report_index_out_of_bounds, report_invalid_exception_caught, report_invalid_exception_cause,
+    report_invalid_exception_raised, report_non_subscriptable,
     report_possibly_unresolved_reference, report_slice_step_size_zero, report_unresolved_reference,
 };
 use super::string_annotation::{
@@ -1446,7 +1447,7 @@ impl<'db> TypeInferenceBuilder<'db> {
     ) -> Type<'db> {
         // TODO: Handle async with statements (they use `aenter` and `aexit`)
         if is_async {
-            return todo_type!("async with statement");
+            return todo_type!("async `with` statement");
         }
 
         let context_manager_ty = context_expression_ty.to_meta_type(self.db());
@@ -1574,9 +1575,7 @@ impl<'db> TypeInferenceBuilder<'db> {
         // If it's an `except*` handler, this won't actually be the type of the bound symbol;
         // it will actually be the type of the generic parameters to `BaseExceptionGroup` or `ExceptionGroup`.
         let symbol_ty = if let Type::Tuple(tuple) = node_ty {
-            let type_base_exception = KnownClass::BaseException
-                .to_subclass_of(self.db())
-                .unwrap_or(Type::Unknown);
+            let type_base_exception = KnownClass::BaseException.to_subclass_of(self.db());
             let mut builder = UnionBuilder::new(self.db());
             for element in tuple.elements(self.db()).iter().copied() {
                 builder = builder.add(
@@ -1594,9 +1593,7 @@ impl<'db> TypeInferenceBuilder<'db> {
         } else if node_ty.is_subtype_of(self.db(), KnownClass::Tuple.to_instance(self.db())) {
             todo_type!("Homogeneous tuple in exception handler")
         } else {
-            let type_base_exception = KnownClass::BaseException
-                .to_subclass_of(self.db())
-                .unwrap_or(Type::Unknown);
+            let type_base_exception = KnownClass::BaseException.to_subclass_of(self.db());
             if node_ty.is_assignable_to(self.db(), type_base_exception) {
                 node_ty.to_instance(self.db())
             } else {
@@ -1683,7 +1680,8 @@ impl<'db> TypeInferenceBuilder<'db> {
             default,
         } = node;
         self.infer_optional_expression(default.as_deref());
-        self.add_declaration_with_binding(node.into(), definition, todo_type!(), todo_type!());
+        let pep_695_todo = todo_type!("PEP-695 ParamSpec definition types");
+        self.add_declaration_with_binding(node.into(), definition, pep_695_todo, pep_695_todo);
     }
 
     fn infer_typevartuple_definition(
@@ -1697,7 +1695,8 @@ impl<'db> TypeInferenceBuilder<'db> {
             default,
         } = node;
         self.infer_optional_expression(default.as_deref());
-        self.add_declaration_with_binding(node.into(), definition, todo_type!(), todo_type!());
+        let pep_695_todo = todo_type!("PEP-695 TypeVarTuple definition types");
+        self.add_declaration_with_binding(node.into(), definition, pep_695_todo, pep_695_todo);
     }
 
     fn infer_match_statement(&mut self, match_statement: &ast::StmtMatch) {
@@ -1732,7 +1731,11 @@ impl<'db> TypeInferenceBuilder<'db> {
         // against the subject expression type (which we can query via `infer_expression_types`)
         // and extract the type at the `index` position if the pattern matches. This will be
         // similar to the logic in `self.infer_assignment_definition`.
-        self.add_binding(pattern.into(), definition, todo_type!());
+        self.add_binding(
+            pattern.into(),
+            definition,
+            todo_type!("`match` pattern definition types"),
+        );
     }
 
     fn infer_match_pattern(&mut self, pattern: &ast::Pattern) {
@@ -2198,8 +2201,30 @@ impl<'db> TypeInferenceBuilder<'db> {
             exc,
             cause,
         } = raise;
-        self.infer_optional_expression(exc.as_deref());
-        self.infer_optional_expression(cause.as_deref());
+
+        let base_exception_type = KnownClass::BaseException.to_subclass_of(self.db());
+        let base_exception_instance = base_exception_type.to_instance(self.db());
+
+        let can_be_raised =
+            UnionType::from_elements(self.db(), [base_exception_type, base_exception_instance]);
+        let can_be_exception_cause =
+            UnionType::from_elements(self.db(), [can_be_raised, Type::none(self.db())]);
+
+        if let Some(raised) = exc {
+            let raised_type = self.infer_expression(raised);
+
+            if !raised_type.is_assignable_to(self.db(), can_be_raised) {
+                report_invalid_exception_raised(&self.context, raised, raised_type);
+            }
+        }
+
+        if let Some(cause) = cause {
+            let cause_type = self.infer_expression(cause);
+
+            if !cause_type.is_assignable_to(self.db(), can_be_exception_cause) {
+                report_invalid_exception_cause(&self.context, cause, cause_type);
+            }
+        }
     }
 
     /// Given a `from .foo import bar` relative import, resolve the relative module
@@ -2464,8 +2489,7 @@ impl<'db> TypeInferenceBuilder<'db> {
             ast::Expr::YieldFrom(yield_from) => self.infer_yield_from_expression(yield_from),
             ast::Expr::Await(await_expression) => self.infer_await_expression(await_expression),
             ast::Expr::IpyEscapeCommand(_) => {
-                // TODO Implement Ipy escape command support
-                todo_type!()
+                todo_type!("Ipy escape command support")
             }
         };
 
@@ -2903,8 +2927,7 @@ impl<'db> TypeInferenceBuilder<'db> {
             self.infer_parameters(parameters);
         }
 
-        // TODO function type
-        todo_type!()
+        todo_type!("typing.Callable type")
     }
 
     fn infer_call_expression(&mut self, call_expression: &ast::ExprCall) -> Type<'db> {
@@ -2940,11 +2963,8 @@ impl<'db> TypeInferenceBuilder<'db> {
 
     fn infer_yield_expression(&mut self, yield_expression: &ast::ExprYield) -> Type<'db> {
         let ast::ExprYield { range: _, value } = yield_expression;
-
         self.infer_optional_expression(value.as_deref());
-
-        // TODO awaitable type
-        todo_type!()
+        todo_type!("yield expressions")
     }
 
     fn infer_yield_from_expression(&mut self, yield_from: &ast::ExprYieldFrom) -> Type<'db> {
@@ -2956,16 +2976,13 @@ impl<'db> TypeInferenceBuilder<'db> {
             .unwrap_with_diagnostic(&self.context, value.as_ref().into());
 
         // TODO get type from `ReturnType` of generator
-        todo_type!()
+        todo_type!("Generic `typing.Generator` type")
     }
 
     fn infer_await_expression(&mut self, await_expression: &ast::ExprAwait) -> Type<'db> {
         let ast::ExprAwait { range: _, value } = await_expression;
-
         self.infer_expression(value);
-
-        // TODO awaitable type
-        todo_type!()
+        todo_type!("generic `typing.Awaitable` type")
     }
 
     /// Look up a name reference that isn't bound in the local scope.
@@ -3182,6 +3199,11 @@ impl<'db> TypeInferenceBuilder<'db> {
         let operand_type = self.infer_expression(operand);
 
         match (op, operand_type) {
+            (_, Type::Any) => Type::Any,
+            (_, Type::Todo(_)) => operand_type,
+            (_, Type::Never) => Type::Never,
+            (_, Type::Unknown) => Type::Unknown,
+
             (UnaryOp::UAdd, Type::IntLiteral(value)) => Type::IntLiteral(value),
             (UnaryOp::USub, Type::IntLiteral(value)) => Type::IntLiteral(-value),
             (UnaryOp::Invert, Type::IntLiteral(value)) => Type::IntLiteral(!value),
@@ -3191,11 +3213,23 @@ impl<'db> TypeInferenceBuilder<'db> {
             (UnaryOp::Invert, Type::BooleanLiteral(bool)) => Type::IntLiteral(!i64::from(bool)),
 
             (UnaryOp::Not, ty) => ty.bool(self.db()).negate().into_type(self.db()),
-            (_, Type::Any) => Type::Any,
-            (_, Type::Unknown) => Type::Unknown,
             (
                 op @ (UnaryOp::UAdd | UnaryOp::USub | UnaryOp::Invert),
-                Type::Instance(InstanceType { class }),
+                Type::FunctionLiteral(_)
+                | Type::ModuleLiteral(_)
+                | Type::ClassLiteral(_)
+                | Type::SubclassOf(_)
+                | Type::Instance(_)
+                | Type::KnownInstance(_)
+                | Type::Union(_)
+                | Type::Intersection(_)
+                | Type::AlwaysTruthy
+                | Type::AlwaysFalsy
+                | Type::StringLiteral(_)
+                | Type::LiteralString
+                | Type::BytesLiteral(_)
+                | Type::SliceLiteral(_)
+                | Type::Tuple(_),
             ) => {
                 let unary_dunder_method = match op {
                     UnaryOp::Invert => "__invert__",
@@ -3206,11 +3240,10 @@ impl<'db> TypeInferenceBuilder<'db> {
                     }
                 };
 
-                if let Symbol::Type(class_member, _) =
-                    class.class_member(self.db(), unary_dunder_method)
+                if let CallDunderResult::CallOutcome(call)
+                | CallDunderResult::PossiblyUnbound(call) =
+                    operand_type.call_dunder(self.db(), unary_dunder_method, &[operand_type])
                 {
-                    let call = class_member.call(self.db(), &[operand_type]);
-
                     match call.return_ty_result(&self.context, AnyNodeRef::ExprUnaryOp(unary)) {
                         Ok(t) => t,
                         Err(e) => {
@@ -3238,7 +3271,6 @@ impl<'db> TypeInferenceBuilder<'db> {
                     Type::Unknown
                 }
             }
-            _ => todo_type!(), // TODO other unary op types
         }
     }
 
@@ -3487,7 +3519,7 @@ impl<'db> TypeInferenceBuilder<'db> {
             (left, Type::BooleanLiteral(bool_value), op) => {
                 self.infer_binary_expression_type(left, Type::IntLiteral(i64::from(bool_value)), op)
             }
-            _ => Some(todo_type!()), // TODO
+            _ => Some(todo_type!("Support for more binary expressions")),
         }
     }
 
@@ -4006,10 +4038,9 @@ impl<'db> TypeInferenceBuilder<'db> {
                     }
                 }
             }
-            // TODO: handle more types
             _ => match op {
                 ast::CmpOp::Is | ast::CmpOp::IsNot => Ok(KnownClass::Bool.to_instance(self.db())),
-                _ => Ok(todo_type!()),
+                _ => Ok(todo_type!("Binary comparisons between more types")),
             },
         }
     }
@@ -4761,7 +4792,7 @@ impl<'db> TypeInferenceBuilder<'db> {
             single_element => {
                 let single_element_ty = self.infer_type_expression(single_element);
                 if element_could_alter_type_of_whole_tuple(single_element, single_element_ty) {
-                    todo_type!()
+                    todo_type!("full tuple[...] support")
                 } else {
                     Type::tuple(self.db(), [single_element_ty])
                 }
@@ -5000,39 +5031,39 @@ impl<'db> TypeInferenceBuilder<'db> {
 
             KnownInstanceType::ReadOnly => {
                 self.infer_type_expression(arguments_slice);
-                todo_type!("Required[] type qualifier")
+                todo_type!("`ReadOnly[]` type qualifier")
             }
             KnownInstanceType::NotRequired => {
                 self.infer_type_expression(arguments_slice);
-                todo_type!("NotRequired[] type qualifier")
+                todo_type!("`NotRequired[]` type qualifier")
             }
             KnownInstanceType::ClassVar => {
                 self.infer_type_expression(arguments_slice);
-                todo_type!("ClassVar[] type qualifier")
+                todo_type!("`ClassVar[]` type qualifier")
             }
             KnownInstanceType::Final => {
                 self.infer_type_expression(arguments_slice);
-                todo_type!("Final[] type qualifier")
+                todo_type!("`Final[]` type qualifier")
             }
             KnownInstanceType::Required => {
                 self.infer_type_expression(arguments_slice);
-                todo_type!("Required[] type qualifier")
+                todo_type!("`Required[]` type qualifier")
             }
             KnownInstanceType::TypeIs => {
                 self.infer_type_expression(arguments_slice);
-                todo_type!("TypeIs[] special form")
+                todo_type!("`TypeIs[]` special form")
             }
             KnownInstanceType::TypeGuard => {
                 self.infer_type_expression(arguments_slice);
-                todo_type!("TypeGuard[] special form")
+                todo_type!("`TypeGuard[]` special form")
             }
             KnownInstanceType::Concatenate => {
                 self.infer_type_expression(arguments_slice);
-                todo_type!("Concatenate[] special form")
+                todo_type!("`Concatenate[]` special form")
             }
             KnownInstanceType::Unpack => {
                 self.infer_type_expression(arguments_slice);
-                todo_type!("Unpack[] special form")
+                todo_type!("`Unpack[]` special form")
             }
             KnownInstanceType::NoReturn | KnownInstanceType::Never | KnownInstanceType::Any => {
                 self.context.report_lint(
