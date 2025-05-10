@@ -17,8 +17,8 @@ use smallvec::{smallvec, SmallVec};
 
 use super::{definition_expression_type, DynamicType, Type};
 use crate::semantic_index::definition::Definition;
-use crate::types::generics::{GenericContext, Specialization};
-use crate::types::{todo_type, TypeVarInstance};
+use crate::types::generics::{GenericContext, Specialization, TypeMapping};
+use crate::types::{todo_type, ClassLiteral, TypeVarInstance};
 use crate::{Db, FxOrderSet};
 use ruff_python_ast::{self as ast, name::Name};
 
@@ -314,13 +314,21 @@ impl<'db> Signature<'db> {
         db: &'db dyn Db,
         specialization: Specialization<'db>,
     ) -> Self {
+        self.apply_type_mapping(db, specialization.type_mapping())
+    }
+
+    pub(crate) fn apply_type_mapping<'a>(
+        &self,
+        db: &'db dyn Db,
+        type_mapping: TypeMapping<'a, 'db>,
+    ) -> Self {
         Self {
             generic_context: self.generic_context,
             inherited_generic_context: self.inherited_generic_context,
-            parameters: self.parameters.apply_specialization(db, specialization),
+            parameters: self.parameters.apply_type_mapping(db, type_mapping),
             return_ty: self
                 .return_ty
-                .map(|ty| ty.apply_specialization(db, specialization)),
+                .map(|ty| ty.apply_type_mapping(db, type_mapping)),
         }
     }
 
@@ -868,6 +876,28 @@ impl<'db> Signature<'db> {
 
         true
     }
+
+    /// See [`Type::replace_self_reference`].
+    pub(crate) fn replace_self_reference(
+        mut self,
+        db: &'db dyn Db,
+        class: ClassLiteral<'db>,
+    ) -> Self {
+        // TODO: also replace self references in generic context
+
+        self.parameters = self
+            .parameters
+            .iter()
+            .cloned()
+            .map(|param| param.replace_self_reference(db, class))
+            .collect();
+
+        if let Some(ty) = self.return_ty.as_mut() {
+            *ty = ty.replace_self_reference(db, class);
+        }
+
+        self
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
@@ -1053,12 +1083,12 @@ impl<'db> Parameters<'db> {
         )
     }
 
-    fn apply_specialization(&self, db: &'db dyn Db, specialization: Specialization<'db>) -> Self {
+    fn apply_type_mapping<'a>(&self, db: &'db dyn Db, type_mapping: TypeMapping<'a, 'db>) -> Self {
         Self {
             value: self
                 .value
                 .iter()
-                .map(|param| param.apply_specialization(db, specialization))
+                .map(|param| param.apply_type_mapping(db, type_mapping))
                 .collect(),
             is_gradual: self.is_gradual,
         }
@@ -1225,12 +1255,12 @@ impl<'db> Parameter<'db> {
         self
     }
 
-    fn apply_specialization(&self, db: &'db dyn Db, specialization: Specialization<'db>) -> Self {
+    fn apply_type_mapping<'a>(&self, db: &'db dyn Db, type_mapping: TypeMapping<'a, 'db>) -> Self {
         Self {
             annotated_type: self
                 .annotated_type
-                .map(|ty| ty.apply_specialization(db, specialization)),
-            kind: self.kind.apply_specialization(db, specialization),
+                .map(|ty| ty.apply_type_mapping(db, type_mapping)),
+            kind: self.kind.apply_type_mapping(db, type_mapping),
             form: self.form,
         }
     }
@@ -1380,6 +1410,14 @@ impl<'db> Parameter<'db> {
             ParameterKind::Variadic { .. } | ParameterKind::KeywordVariadic { .. } => None,
         }
     }
+
+    /// See [`Type::replace_self_reference`].
+    fn replace_self_reference(mut self, db: &'db (dyn Db), class: ClassLiteral<'db>) -> Self {
+        if let Some(ty) = self.annotated_type.as_mut() {
+            *ty = ty.replace_self_reference(db, class);
+        }
+        self
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
@@ -1422,24 +1460,24 @@ pub(crate) enum ParameterKind<'db> {
 }
 
 impl<'db> ParameterKind<'db> {
-    fn apply_specialization(&self, db: &'db dyn Db, specialization: Specialization<'db>) -> Self {
+    fn apply_type_mapping<'a>(&self, db: &'db dyn Db, type_mapping: TypeMapping<'a, 'db>) -> Self {
         match self {
             Self::PositionalOnly { default_type, name } => Self::PositionalOnly {
                 default_type: default_type
                     .as_ref()
-                    .map(|ty| ty.apply_specialization(db, specialization)),
+                    .map(|ty| ty.apply_type_mapping(db, type_mapping)),
                 name: name.clone(),
             },
             Self::PositionalOrKeyword { default_type, name } => Self::PositionalOrKeyword {
                 default_type: default_type
                     .as_ref()
-                    .map(|ty| ty.apply_specialization(db, specialization)),
+                    .map(|ty| ty.apply_type_mapping(db, type_mapping)),
                 name: name.clone(),
             },
             Self::KeywordOnly { default_type, name } => Self::KeywordOnly {
                 default_type: default_type
                     .as_ref()
-                    .map(|ty| ty.apply_specialization(db, specialization)),
+                    .map(|ty| ty.apply_type_mapping(db, type_mapping)),
                 name: name.clone(),
             },
             Self::Variadic { .. } | Self::KeywordVariadic { .. } => self.clone(),
