@@ -10,6 +10,7 @@ use super::{
     InferContext, Signature, Signatures, Type,
 };
 use crate::db::Db;
+use crate::dunder_all::dunder_all_names;
 use crate::symbol::{Boundness, Symbol};
 use crate::types::diagnostic::{
     CALL_NON_CALLABLE, CONFLICTING_ARGUMENT_FORMS, INVALID_ARGUMENT_TYPE, MISSING_ARGUMENT,
@@ -19,11 +20,11 @@ use crate::types::diagnostic::{
 use crate::types::generics::{Specialization, SpecializationBuilder, SpecializationError};
 use crate::types::signatures::{Parameter, ParameterForm};
 use crate::types::{
-    todo_type, BoundMethodType, DataclassParams, DataclassTransformerParams, FunctionDecorators,
+    BoundMethodType, DataclassParams, DataclassTransformerParams, FunctionDecorators, FunctionType,
     KnownClass, KnownFunction, KnownInstanceType, MethodWrapperKind, PropertyInstanceType,
-    TupleType, UnionType, WrapperDescriptorKind,
+    TupleType, UnionType, WrapperDescriptorKind, todo_type,
 };
-use ruff_db::diagnostic::{Annotation, Severity, SubDiagnostic};
+use ruff_db::diagnostic::{Annotation, Diagnostic, Severity, SubDiagnostic};
 use ruff_python_ast as ast;
 
 /// Binding information for a possible union of callables. At a call site, the arguments must be
@@ -198,11 +199,19 @@ impl<'db> Bindings<'db> {
             }
         }
 
-        // TODO: We currently only report errors for the first union element. Ideally, we'd report
-        // an error saying that the union type can't be called, followed by subdiagnostics
-        // explaining why.
-        if let Some(first) = self.into_iter().find(|b| b.as_result().is_err()) {
-            first.report_diagnostics(context, node);
+        // If this is not a union, then report a diagnostic for any
+        // errors as normal.
+        if let Some(binding) = self.single_element() {
+            binding.report_diagnostics(context, node, None);
+            return;
+        }
+
+        for binding in self {
+            let union_diag = UnionDiagnostic {
+                callable_type: self.callable_type(),
+                binding,
+            };
+            binding.report_diagnostics(context, node, Some(&union_diag));
         }
     }
 
@@ -296,24 +305,33 @@ impl<'db> Bindings<'db> {
 
                     Type::WrapperDescriptor(WrapperDescriptorKind::PropertyDunderGet) => {
                         match overload.parameter_types() {
-                            [Some(property @ Type::PropertyInstance(_)), Some(instance), ..]
-                                if instance.is_none(db) =>
-                            {
+                            [
+                                Some(property @ Type::PropertyInstance(_)),
+                                Some(instance),
+                                ..,
+                            ] if instance.is_none(db) => {
                                 overload.set_return_type(*property);
                             }
-                            [Some(Type::PropertyInstance(property)), Some(Type::KnownInstance(KnownInstanceType::TypeAliasType(
-                                type_alias,
-                            ))), ..]
-                                if property.getter(db).is_some_and(|getter| {
-                                    getter
-                                        .into_function_literal()
-                                        .is_some_and(|f| f.name(db) == "__name__")
-                                }) =>
+                            [
+                                Some(Type::PropertyInstance(property)),
+                                Some(Type::KnownInstance(KnownInstanceType::TypeAliasType(
+                                    type_alias,
+                                ))),
+                                ..,
+                            ] if property.getter(db).is_some_and(|getter| {
+                                getter
+                                    .into_function_literal()
+                                    .is_some_and(|f| f.name(db) == "__name__")
+                            }) =>
                             {
                                 overload
                                     .set_return_type(Type::string_literal(db, type_alias.name(db)));
                             }
-                            [Some(Type::PropertyInstance(property)), Some(Type::KnownInstance(KnownInstanceType::TypeVar(typevar))), ..] => {
+                            [
+                                Some(Type::PropertyInstance(property)),
+                                Some(Type::KnownInstance(KnownInstanceType::TypeVar(typevar))),
+                                ..,
+                            ] => {
                                 match property
                                     .getter(db)
                                     .and_then(Type::into_function_literal)
@@ -402,8 +420,12 @@ impl<'db> Bindings<'db> {
                     }
 
                     Type::WrapperDescriptor(WrapperDescriptorKind::PropertyDunderSet) => {
-                        if let [Some(Type::PropertyInstance(property)), Some(instance), Some(value), ..] =
-                            overload.parameter_types()
+                        if let [
+                            Some(Type::PropertyInstance(property)),
+                            Some(instance),
+                            Some(value),
+                            ..,
+                        ] = overload.parameter_types()
                         {
                             if let Some(setter) = property.setter(db) {
                                 if let Err(_call_error) = setter.try_call(
@@ -446,7 +468,7 @@ impl<'db> Bindings<'db> {
                             overload.parameter_types()
                         {
                             overload.set_return_type(Type::BooleanLiteral(
-                                literal.value(db).starts_with(&**prefix.value(db)),
+                                literal.value(db).starts_with(prefix.value(db)),
                             ));
                         }
                     }
@@ -585,6 +607,30 @@ impl<'db> Bindings<'db> {
                             }
                         }
 
+                        Some(KnownFunction::DunderAllNames) => {
+                            if let [Some(ty)] = overload.parameter_types() {
+                                overload.set_return_type(match ty {
+                                    Type::ModuleLiteral(module_literal) => {
+                                        match dunder_all_names(db, module_literal.module(db).file())
+                                        {
+                                            Some(names) => {
+                                                let mut names = names.iter().collect::<Vec<_>>();
+                                                names.sort();
+                                                TupleType::from_elements(
+                                                    db,
+                                                    names.iter().map(|name| {
+                                                        Type::string_literal(db, name.as_str())
+                                                    }),
+                                                )
+                                            }
+                                            None => Type::none(db),
+                                        }
+                                    }
+                                    _ => Type::none(db),
+                                });
+                            }
+                        }
+
                         Some(KnownFunction::Len) => {
                             if let [Some(first_arg)] = overload.parameter_types() {
                                 if let Some(len_ty) = first_arg.len(db) {
@@ -622,7 +668,7 @@ impl<'db> Bindings<'db> {
                                         db,
                                         protocol_class
                                             .interface(db)
-                                            .members()
+                                            .members(db)
                                             .map(|member| Type::string_literal(db, member.name()))
                                             .collect::<Box<[Type<'db>]>>(),
                                     )));
@@ -706,8 +752,18 @@ impl<'db> Bindings<'db> {
                         }
 
                         Some(KnownFunction::Dataclass) => {
-                            if let [init, repr, eq, order, unsafe_hash, frozen, match_args, kw_only, slots, weakref_slot] =
-                                overload.parameter_types()
+                            if let [
+                                init,
+                                repr,
+                                eq,
+                                order,
+                                unsafe_hash,
+                                frozen,
+                                match_args,
+                                kw_only,
+                                slots,
+                                weakref_slot,
+                            ] = overload.parameter_types()
                             {
                                 let mut params = DataclassParams::empty();
 
@@ -747,8 +803,14 @@ impl<'db> Bindings<'db> {
                         }
 
                         Some(KnownFunction::DataclassTransform) => {
-                            if let [eq_default, order_default, kw_only_default, frozen_default, _field_specifiers, _kwargs] =
-                                overload.parameter_types()
+                            if let [
+                                eq_default,
+                                order_default,
+                                kw_only_default,
+                                frozen_default,
+                                _field_specifiers,
+                                _kwargs,
+                            ] = overload.parameter_types()
                             {
                                 let mut params = DataclassTransformerParams::empty();
 
@@ -770,29 +832,50 @@ impl<'db> Bindings<'db> {
                         }
 
                         _ => {
-                            if let Some(params) = function_type.dataclass_transformer_params(db) {
-                                // This is a call to a custom function that was decorated with `@dataclass_transformer`.
-                                // If this function was called with a keyword argument like `order=False`, we extract
-                                // the argument type and overwrite the corresponding flag in `dataclass_params` after
-                                // constructing them from the `dataclass_transformer`-parameter defaults.
+                            let mut handle_dataclass_transformer_params =
+                                |function_type: &FunctionType| {
+                                    if let Some(params) =
+                                        function_type.dataclass_transformer_params(db)
+                                    {
+                                        // This is a call to a custom function that was decorated with `@dataclass_transformer`.
+                                        // If this function was called with a keyword argument like `order=False`, we extract
+                                        // the argument type and overwrite the corresponding flag in `dataclass_params` after
+                                        // constructing them from the `dataclass_transformer`-parameter defaults.
 
-                                let mut dataclass_params = DataclassParams::from(params);
+                                        let mut dataclass_params = DataclassParams::from(params);
 
-                                if let Some(Some(Type::BooleanLiteral(order))) = callable_signature
+                                        if let Some(Some(Type::BooleanLiteral(order))) =
+                                            callable_signature.iter().nth(overload_index).and_then(
+                                                |signature| {
+                                                    let (idx, _) = signature
+                                                        .parameters()
+                                                        .keyword_by_name("order")?;
+                                                    overload.parameter_types().get(idx)
+                                                },
+                                            )
+                                        {
+                                            dataclass_params.set(DataclassParams::ORDER, *order);
+                                        }
+
+                                        overload.set_return_type(Type::DataclassDecorator(
+                                            dataclass_params,
+                                        ));
+                                    }
+                                };
+
+                            // Ideally, either the implementation, or exactly one of the overloads
+                            // of the function can have the dataclass_transform decorator applied.
+                            // However, we do not yet enforce this, and in the case of multiple
+                            // applications of the decorator, we will only consider the last one
+                            // for the return value, since the prior ones will be over-written.
+                            if let Some(overloaded) = function_type.to_overloaded(db) {
+                                overloaded
+                                    .overloads
                                     .iter()
-                                    .nth(overload_index)
-                                    .and_then(|signature| {
-                                        let (idx, _) =
-                                            signature.parameters().keyword_by_name("order")?;
-                                        overload.parameter_types().get(idx)
-                                    })
-                                {
-                                    dataclass_params.set(DataclassParams::ORDER, *order);
-                                }
-
-                                overload
-                                    .set_return_type(Type::DataclassDecorator(dataclass_params));
+                                    .for_each(&mut handle_dataclass_transformer_params);
                             }
+
+                            handle_dataclass_transformer_params(&function_type);
                         }
                     },
 
@@ -1000,31 +1083,65 @@ impl<'db> CallableBinding<'db> {
         Type::unknown()
     }
 
-    fn report_diagnostics(&self, context: &InferContext<'db>, node: ast::AnyNodeRef) {
+    fn report_diagnostics(
+        &self,
+        context: &InferContext<'db>,
+        node: ast::AnyNodeRef,
+        union_diag: Option<&UnionDiagnostic<'_, '_>>,
+    ) {
         if !self.is_callable() {
             if let Some(builder) = context.report_lint(&CALL_NON_CALLABLE, node) {
-                builder.into_diagnostic(format_args!(
+                let mut diag = builder.into_diagnostic(format_args!(
                     "Object of type `{}` is not callable",
                     self.callable_type.display(context.db()),
                 ));
+                if let Some(union_diag) = union_diag {
+                    union_diag.add_union_context(context.db(), &mut diag);
+                }
             }
             return;
         }
 
         if self.dunder_call_is_possibly_unbound {
             if let Some(builder) = context.report_lint(&CALL_NON_CALLABLE, node) {
-                builder.into_diagnostic(format_args!(
+                let mut diag = builder.into_diagnostic(format_args!(
                     "Object of type `{}` is not callable (possibly unbound `__call__` method)",
                     self.callable_type.display(context.db()),
                 ));
+                if let Some(union_diag) = union_diag {
+                    union_diag.add_union_context(context.db(), &mut diag);
+                }
             }
             return;
         }
 
-        let callable_description = CallableDescription::new(context.db(), self.callable_type);
-        if self.overloads.len() > 1 {
-            if let Some(builder) = context.report_lint(&NO_MATCHING_OVERLOAD, node) {
-                builder.into_diagnostic(format_args!(
+        match self.overloads.as_slice() {
+            [] => {}
+            [overload] => {
+                let callable_description =
+                    CallableDescription::new(context.db(), self.signature_type);
+                overload.report_diagnostics(
+                    context,
+                    node,
+                    self.signature_type,
+                    callable_description.as_ref(),
+                    union_diag,
+                );
+            }
+            _overloads => {
+                // When the number of unmatched overloads exceeds this number, we stop
+                // printing them to avoid excessive output.
+                //
+                // An example of a routine with many many overloads:
+                // https://github.com/henribru/google-api-python-client-stubs/blob/master/googleapiclient-stubs/discovery.pyi
+                const MAXIMUM_OVERLOADS: usize = 50;
+
+                let Some(builder) = context.report_lint(&NO_MATCHING_OVERLOAD, node) else {
+                    return;
+                };
+                let callable_description =
+                    CallableDescription::new(context.db(), self.callable_type);
+                let mut diag = builder.into_diagnostic(format_args!(
                     "No overload{} matches arguments",
                     if let Some(CallableDescription { kind, name }) = callable_description {
                         format!(" of {kind} `{name}`")
@@ -1032,18 +1149,64 @@ impl<'db> CallableBinding<'db> {
                         String::new()
                     }
                 ));
-            }
-            return;
-        }
+                // TODO: This should probably be adapted to handle more
+                // types of callables[1]. At present, it just handles
+                // standard function and method calls.
+                //
+                // [1]: https://github.com/astral-sh/ty/issues/274#issuecomment-2881856028
+                let function_type_and_kind = match self.signature_type {
+                    Type::FunctionLiteral(function) => Some(("function", function)),
+                    Type::BoundMethod(bound_method) => {
+                        Some(("bound method", bound_method.function(context.db())))
+                    }
+                    _ => None,
+                };
+                if let Some((kind, function)) = function_type_and_kind {
+                    if let Some(overloaded_function) = function.to_overloaded(context.db()) {
+                        if let Some(spans) = overloaded_function
+                            .overloads
+                            .first()
+                            .and_then(|overload| overload.spans(context.db()))
+                        {
+                            let mut sub =
+                                SubDiagnostic::new(Severity::Info, "First overload defined here");
+                            sub.annotate(Annotation::primary(spans.signature));
+                            diag.sub(sub);
+                        }
 
-        let callable_description = CallableDescription::new(context.db(), self.signature_type);
-        for overload in &self.overloads {
-            overload.report_diagnostics(
-                context,
-                node,
-                self.signature_type,
-                callable_description.as_ref(),
-            );
+                        diag.info(format_args!(
+                            "Possible overloads for {kind} `{}`:",
+                            function.name(context.db())
+                        ));
+
+                        let overloads = &function.signature(context.db()).overloads.overloads;
+                        for overload in overloads.iter().take(MAXIMUM_OVERLOADS) {
+                            diag.info(format_args!("  {}", overload.display(context.db())));
+                        }
+                        if overloads.len() > MAXIMUM_OVERLOADS {
+                            diag.info(format_args!(
+                                "... omitted {remaining} overloads",
+                                remaining = overloads.len() - MAXIMUM_OVERLOADS
+                            ));
+                        }
+
+                        if let Some(spans) = overloaded_function
+                            .implementation
+                            .and_then(|function| function.spans(context.db()))
+                        {
+                            let mut sub = SubDiagnostic::new(
+                                Severity::Info,
+                                "Overload implementation defined here",
+                            );
+                            sub.annotate(Annotation::primary(spans.signature));
+                            diag.sub(sub);
+                        }
+                    }
+                }
+                if let Some(union_diag) = union_diag {
+                    union_diag.add_union_context(context.db(), &mut diag);
+                }
+            }
         }
     }
 }
@@ -1163,14 +1326,8 @@ impl<'db> Binding<'db> {
                     first_excess_argument_index,
                     num_synthetic_args,
                 ),
-                expected_positional_count: parameters
-                    .positional()
-                    .count()
-                    // using saturating_sub to avoid negative values due to invalid syntax in source code
-                    .saturating_sub(num_synthetic_args),
-                provided_positional_count: next_positional
-                    // using saturating_sub to avoid negative values due to invalid syntax in source code
-                    .saturating_sub(num_synthetic_args),
+                expected_positional_count: parameters.positional().count(),
+                provided_positional_count: next_positional,
             });
         }
         let mut missing = vec![];
@@ -1322,21 +1479,6 @@ impl<'db> Binding<'db> {
         &self.parameter_tys
     }
 
-    /// Returns the bound types for each parameter, in parameter source order, with default values
-    /// applied for arguments that weren't matched to a parameter. Returns `None` if there are any
-    /// non-default arguments that weren't matched to a parameter.
-    pub(crate) fn parameter_types_with_defaults(
-        &self,
-        signature: &Signature<'db>,
-    ) -> Option<Box<[Type<'db>]>> {
-        signature
-            .parameters()
-            .iter()
-            .zip(&self.parameter_tys)
-            .map(|(parameter, parameter_ty)| parameter_ty.or(parameter.default_type()))
-            .collect()
-    }
-
     pub(crate) fn arguments_for_parameter<'a>(
         &'a self,
         argument_types: &'a CallArgumentTypes<'a, 'db>,
@@ -1357,9 +1499,10 @@ impl<'db> Binding<'db> {
         node: ast::AnyNodeRef,
         callable_ty: Type<'db>,
         callable_description: Option<&CallableDescription>,
+        union_diag: Option<&UnionDiagnostic<'_, '_>>,
     ) {
         for error in &self.errors {
-            error.report_diagnostic(context, node, callable_ty, callable_description);
+            error.report_diagnostic(context, node, callable_ty, callable_description, union_diag);
         }
     }
 
@@ -1511,12 +1654,13 @@ pub(crate) enum BindingError<'db> {
 }
 
 impl<'db> BindingError<'db> {
-    pub(super) fn report_diagnostic(
+    fn report_diagnostic(
         &self,
         context: &InferContext<'db>,
         node: ast::AnyNodeRef,
         callable_ty: Type<'db>,
         callable_description: Option<&CallableDescription>,
+        union_diag: Option<&UnionDiagnostic<'_, '_>>,
     ) {
         match self {
             Self::InvalidArgumentType {
@@ -1533,7 +1677,14 @@ impl<'db> BindingError<'db> {
                 let provided_ty_display = provided_ty.display(context.db());
                 let expected_ty_display = expected_ty.display(context.db());
 
-                let mut diag = builder.into_diagnostic("Argument to this function is incorrect");
+                let mut diag = builder.into_diagnostic(format_args!(
+                    "Argument{} is incorrect",
+                    if let Some(CallableDescription { kind, name }) = callable_description {
+                        format!(" to {kind} `{name}`")
+                    } else {
+                        String::new()
+                    }
+                ));
                 diag.set_primary_message(format_args!(
                     "Expected `{expected_ty_display}`, found `{provided_ty_display}`"
                 ));
@@ -1547,6 +1698,9 @@ impl<'db> BindingError<'db> {
                     );
                     diag.sub(sub);
                 }
+                if let Some(union_diag) = union_diag {
+                    union_diag.add_union_context(context.db(), &mut diag);
+                }
             }
 
             Self::TooManyPositionalArguments {
@@ -1556,7 +1710,7 @@ impl<'db> BindingError<'db> {
             } => {
                 let node = Self::get_node(node, *first_excess_argument_index);
                 if let Some(builder) = context.report_lint(&TOO_MANY_POSITIONAL_ARGUMENTS, node) {
-                    builder.into_diagnostic(format_args!(
+                    let mut diag = builder.into_diagnostic(format_args!(
                         "Too many positional arguments{}: expected \
                         {expected_positional_count}, got {provided_positional_count}",
                         if let Some(CallableDescription { kind, name }) = callable_description {
@@ -1565,13 +1719,16 @@ impl<'db> BindingError<'db> {
                             String::new()
                         }
                     ));
+                    if let Some(union_diag) = union_diag {
+                        union_diag.add_union_context(context.db(), &mut diag);
+                    }
                 }
             }
 
             Self::MissingArguments { parameters } => {
                 if let Some(builder) = context.report_lint(&MISSING_ARGUMENT, node) {
                     let s = if parameters.0.len() == 1 { "" } else { "s" };
-                    builder.into_diagnostic(format_args!(
+                    let mut diag = builder.into_diagnostic(format_args!(
                         "No argument{s} provided for required parameter{s} {parameters}{}",
                         if let Some(CallableDescription { kind, name }) = callable_description {
                             format!(" of {kind} `{name}`")
@@ -1579,6 +1736,9 @@ impl<'db> BindingError<'db> {
                             String::new()
                         }
                     ));
+                    if let Some(union_diag) = union_diag {
+                        union_diag.add_union_context(context.db(), &mut diag);
+                    }
                 }
             }
 
@@ -1588,7 +1748,7 @@ impl<'db> BindingError<'db> {
             } => {
                 let node = Self::get_node(node, *argument_index);
                 if let Some(builder) = context.report_lint(&UNKNOWN_ARGUMENT, node) {
-                    builder.into_diagnostic(format_args!(
+                    let mut diag = builder.into_diagnostic(format_args!(
                         "Argument `{argument_name}` does not match any known parameter{}",
                         if let Some(CallableDescription { kind, name }) = callable_description {
                             format!(" of {kind} `{name}`")
@@ -1596,6 +1756,9 @@ impl<'db> BindingError<'db> {
                             String::new()
                         }
                     ));
+                    if let Some(union_diag) = union_diag {
+                        union_diag.add_union_context(context.db(), &mut diag);
+                    }
                 }
             }
 
@@ -1605,7 +1768,7 @@ impl<'db> BindingError<'db> {
             } => {
                 let node = Self::get_node(node, *argument_index);
                 if let Some(builder) = context.report_lint(&PARAMETER_ALREADY_ASSIGNED, node) {
-                    builder.into_diagnostic(format_args!(
+                    let mut diag = builder.into_diagnostic(format_args!(
                         "Multiple values provided for parameter {parameter}{}",
                         if let Some(CallableDescription { kind, name }) = callable_description {
                             format!(" of {kind} `{name}`")
@@ -1613,6 +1776,9 @@ impl<'db> BindingError<'db> {
                             String::new()
                         }
                     ));
+                    if let Some(union_diag) = union_diag {
+                        union_diag.add_union_context(context.db(), &mut diag);
+                    }
                 }
             }
 
@@ -1629,7 +1795,14 @@ impl<'db> BindingError<'db> {
                 let argument_type = error.argument_type();
                 let argument_ty_display = argument_type.display(context.db());
 
-                let mut diag = builder.into_diagnostic("Argument to this function is incorrect");
+                let mut diag = builder.into_diagnostic(format_args!(
+                    "Argument{} is incorrect",
+                    if let Some(CallableDescription { kind, name }) = callable_description {
+                        format!(" to {kind} `{name}`")
+                    } else {
+                        String::new()
+                    }
+                ));
                 diag.set_primary_message(format_args!(
                     "Argument type `{argument_ty_display}` does not satisfy {} of type variable `{}`",
                     match error {
@@ -1643,12 +1816,15 @@ impl<'db> BindingError<'db> {
                 let mut sub = SubDiagnostic::new(Severity::Info, "Type variable defined here");
                 sub.annotate(Annotation::primary(typevar_range.into()));
                 diag.sub(sub);
+                if let Some(union_diag) = union_diag {
+                    union_diag.add_union_context(context.db(), &mut diag);
+                }
             }
 
             Self::InternalCallError(reason) => {
                 let node = Self::get_node(node, None);
                 if let Some(builder) = context.report_lint(&CALL_NON_CALLABLE, node) {
-                    builder.into_diagnostic(format_args!(
+                    let mut diag = builder.into_diagnostic(format_args!(
                         "Call{} failed: {reason}",
                         if let Some(CallableDescription { kind, name }) = callable_description {
                             format!(" of {kind} `{name}`")
@@ -1656,6 +1832,9 @@ impl<'db> BindingError<'db> {
                             String::new()
                         }
                     ));
+                    if let Some(union_diag) = union_diag {
+                        union_diag.add_union_context(context.db(), &mut diag);
+                    }
                 }
             }
         }
@@ -1678,5 +1857,41 @@ impl<'db> BindingError<'db> {
             }
             _ => node,
         }
+    }
+}
+
+/// Contains additional context for union specific diagnostics.
+///
+/// This is used when a function call is inconsistent with one or more variants
+/// of a union. This can be used to attach sub-diagnostics that clarify that
+/// the error is part of a union.
+struct UnionDiagnostic<'b, 'db> {
+    /// The type of the union.
+    callable_type: Type<'db>,
+    /// The specific binding that failed.
+    binding: &'b CallableBinding<'db>,
+}
+
+impl UnionDiagnostic<'_, '_> {
+    /// Adds context about any relevant union function types to the given
+    /// diagnostic.
+    fn add_union_context(&self, db: &'_ dyn Db, diag: &mut Diagnostic) {
+        let sub = SubDiagnostic::new(
+            Severity::Info,
+            format_args!(
+                "Union variant `{callable_ty}` is incompatible with this call site",
+                callable_ty = self.binding.callable_type.display(db),
+            ),
+        );
+        diag.sub(sub);
+
+        let sub = SubDiagnostic::new(
+            Severity::Info,
+            format_args!(
+                "Attempted to call union type `{}`",
+                self.callable_type.display(db)
+            ),
+        );
+        diag.sub(sub);
     }
 }

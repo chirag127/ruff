@@ -1,8 +1,8 @@
-use std::panic::RefUnwindSafe;
+use std::panic::{AssertUnwindSafe, RefUnwindSafe};
 use std::sync::Arc;
 
-use crate::DEFAULT_LINT_REGISTRY;
-use crate::{Project, ProjectMetadata};
+use crate::{DEFAULT_LINT_REGISTRY, DummyReporter};
+use crate::{Project, ProjectMetadata, Reporter};
 use ruff_db::diagnostic::Diagnostic;
 use ruff_db::files::{File, Files};
 use ruff_db::system::System;
@@ -37,7 +37,19 @@ impl ProjectDatabase {
     {
         let mut db = Self {
             project: None,
-            storage: salsa::Storage::default(),
+            storage: salsa::Storage::new(if tracing::enabled!(tracing::Level::TRACE) {
+                Some(Box::new({
+                    move |event: Event| {
+                        if matches!(event.kind, salsa::EventKind::WillCheckCancellation) {
+                            return;
+                        }
+
+                        tracing::trace!("Salsa event: {event:?}");
+                    }
+                }))
+            } else {
+                None
+            }),
             files: Files::default(),
             system: Arc::new(system),
         };
@@ -57,7 +69,18 @@ impl ProjectDatabase {
 
     /// Checks all open files in the project and its dependencies.
     pub fn check(&self) -> Result<Vec<Diagnostic>, Cancelled> {
-        self.with_db(|db| db.project().check(db))
+        let mut reporter = DummyReporter;
+        let reporter = AssertUnwindSafe(&mut reporter as &mut dyn Reporter);
+        self.with_db(|db| db.project().check(db, reporter))
+    }
+
+    /// Checks all open files in the project and its dependencies, using the given reporter.
+    pub fn check_with_reporter(
+        &self,
+        reporter: &mut dyn Reporter,
+    ) -> Result<Vec<Diagnostic>, Cancelled> {
+        let reporter = AssertUnwindSafe(reporter);
+        self.with_db(|db| db.project().check(db, reporter))
     }
 
     #[tracing::instrument(level = "debug", skip(self))]
@@ -114,6 +137,16 @@ impl Upcast<dyn IdeDb> for ProjectDatabase {
     }
 }
 
+impl Upcast<dyn Db> for ProjectDatabase {
+    fn upcast(&self) -> &(dyn Db + 'static) {
+        self
+    }
+
+    fn upcast_mut(&mut self) -> &mut (dyn Db + 'static) {
+        self
+    }
+}
+
 #[salsa::db]
 impl IdeDb for ProjectDatabase {}
 
@@ -127,7 +160,7 @@ impl SemanticDb for ProjectDatabase {
         project.is_file_open(self, file)
     }
 
-    fn rule_selection(&self) -> Arc<RuleSelection> {
+    fn rule_selection(&self) -> &RuleSelection {
         self.project().rules(self)
     }
 
@@ -156,20 +189,7 @@ impl SourceDb for ProjectDatabase {
 }
 
 #[salsa::db]
-impl salsa::Database for ProjectDatabase {
-    fn salsa_event(&self, event: &dyn Fn() -> Event) {
-        if !tracing::enabled!(tracing::Level::TRACE) {
-            return;
-        }
-
-        let event = event();
-        if matches!(event.kind, salsa::EventKind::WillCheckCancellation) {
-            return;
-        }
-
-        tracing::trace!("Salsa event: {event:?}");
-    }
-}
+impl salsa::Database for ProjectDatabase {}
 
 #[salsa::db]
 impl Db for ProjectDatabase {
@@ -181,8 +201,8 @@ impl Db for ProjectDatabase {
 #[cfg(feature = "format")]
 mod format {
     use crate::ProjectDatabase;
-    use ruff_db::files::File;
     use ruff_db::Upcast;
+    use ruff_db::files::File;
     use ruff_python_formatter::{Db as FormatDb, PyFormatOptions};
 
     #[salsa::db]
@@ -206,9 +226,7 @@ mod format {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::sync::Arc;
-
-    use salsa::Event;
+    use std::sync::{Arc, Mutex};
 
     use ruff_db::files::Files;
     use ruff_db::system::{DbWithTestSystem, System, TestSystem};
@@ -217,15 +235,17 @@ pub(crate) mod tests {
     use ty_python_semantic::lint::{LintRegistry, RuleSelection};
     use ty_python_semantic::{Db as SemanticDb, Program};
 
-    use crate::db::Db;
     use crate::DEFAULT_LINT_REGISTRY;
+    use crate::db::Db;
     use crate::{Project, ProjectMetadata};
+
+    type Events = Arc<Mutex<Vec<salsa::Event>>>;
 
     #[salsa::db]
     #[derive(Clone)]
     pub(crate) struct TestDb {
         storage: salsa::Storage<Self>,
-        events: Arc<std::sync::Mutex<Vec<Event>>>,
+        events: Events,
         files: Files,
         system: TestSystem,
         vendored: VendoredFileSystem,
@@ -234,12 +254,19 @@ pub(crate) mod tests {
 
     impl TestDb {
         pub(crate) fn new(project: ProjectMetadata) -> Self {
+            let events = Events::default();
             let mut db = Self {
-                storage: salsa::Storage::default(),
+                storage: salsa::Storage::new(Some(Box::new({
+                    let events = events.clone();
+                    move |event| {
+                        let mut events = events.lock().unwrap();
+                        events.push(event);
+                    }
+                }))),
                 system: TestSystem::default(),
                 vendored: ty_vendored::file_system().clone(),
                 files: Files::default(),
-                events: Arc::default(),
+                events,
                 project: None,
             };
 
@@ -251,13 +278,9 @@ pub(crate) mod tests {
 
     impl TestDb {
         /// Takes the salsa events.
-        ///
-        /// ## Panics
-        /// If there are any pending salsa snapshots.
         pub(crate) fn take_salsa_events(&mut self) -> Vec<salsa::Event> {
-            let inner = Arc::get_mut(&mut self.events).expect("no pending salsa snapshots");
+            let mut events = self.events.lock().unwrap();
 
-            let events = inner.get_mut().unwrap();
             std::mem::take(&mut *events)
         }
     }
@@ -315,7 +338,7 @@ pub(crate) mod tests {
             !file.path(self).is_vendored_path()
         }
 
-        fn rule_selection(&self) -> Arc<RuleSelection> {
+        fn rule_selection(&self) -> &RuleSelection {
             self.project().rules(self)
         }
 
@@ -332,10 +355,5 @@ pub(crate) mod tests {
     }
 
     #[salsa::db]
-    impl salsa::Database for TestDb {
-        fn salsa_event(&self, event: &dyn Fn() -> Event) {
-            let mut events = self.events.lock().unwrap();
-            events.push(event());
-        }
-    }
+    impl salsa::Database for TestDb {}
 }

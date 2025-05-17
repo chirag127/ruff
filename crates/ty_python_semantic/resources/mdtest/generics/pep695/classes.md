@@ -65,7 +65,7 @@ from typing import Generic, TypeVar
 
 T = TypeVar("T")
 
-# error: [invalid-generic-class] "Cannot both inherit from `Generic` and use PEP 695 type variables"
+# error: [invalid-generic-class] "Cannot both inherit from `typing.Generic` and use PEP 695 type variables"
 class BothGenericSyntaxes[U](Generic[T]): ...
 ```
 
@@ -98,11 +98,11 @@ reveal_type(Bounded[int]())  # revealed: Bounded[int]
 reveal_type(Bounded[IntSubclass]())  # revealed: Bounded[IntSubclass]
 
 # TODO: update this diagnostic to talk about type parameters and specializations
-# error: [invalid-argument-type] "Argument to this function is incorrect: Expected `int`, found `str`"
+# error: [invalid-argument-type] "Argument to class `Bounded` is incorrect: Expected `int`, found `str`"
 reveal_type(Bounded[str]())  # revealed: Unknown
 
 # TODO: update this diagnostic to talk about type parameters and specializations
-# error: [invalid-argument-type] "Argument to this function is incorrect: Expected `int`, found `int | str`"
+# error: [invalid-argument-type] "Argument to class `Bounded` is incorrect: Expected `int`, found `int | str`"
 reveal_type(Bounded[int | str]())  # revealed: Unknown
 
 reveal_type(BoundedByUnion[int]())  # revealed: BoundedByUnion[int]
@@ -129,7 +129,7 @@ reveal_type(Constrained[str]())  # revealed: Constrained[str]
 reveal_type(Constrained[int | str]())  # revealed: Constrained[int | str]
 
 # TODO: update this diagnostic to talk about type parameters and specializations
-# error: [invalid-argument-type] "Argument to this function is incorrect: Expected `int | str`, found `object`"
+# error: [invalid-argument-type] "Argument to class `Constrained` is incorrect: Expected `int | str`, found `object`"
 reveal_type(Constrained[object]())  # revealed: Unknown
 ```
 
@@ -285,13 +285,17 @@ When a generic subclass fills its superclass's type parameter with one of its ow
 propagate through:
 
 ```py
-class Base[T]:
-    x: T | None = None
+class Parent[T]:
+    x: T
 
-class Sub[U](Base[U]): ...
+class Child[U](Parent[U]): ...
+class Grandchild[V](Child[V]): ...
+class Greatgrandchild[W](Child[W]): ...
 
-reveal_type(Base[int].x)  # revealed: int | None
-reveal_type(Sub[int].x)  # revealed: int | None
+reveal_type(Parent[int]().x)  # revealed: int
+reveal_type(Child[int]().x)  # revealed: int
+reveal_type(Grandchild[int]().x)  # revealed: int
+reveal_type(Greatgrandchild[int]().x)  # revealed: int
 ```
 
 ## Generic methods
@@ -343,6 +347,26 @@ reveal_type(c.method2())  # revealed: str
 reveal_type(c.method3())  # revealed: LinkedList[int]
 ```
 
+When a method is overloaded, the specialization is applied to all overloads.
+
+```py
+from typing import overload
+
+class WithOverloadedMethod[T]:
+    @overload
+    def method(self, x: T) -> T:
+        return x
+
+    @overload
+    def method[S](self, x: S) -> S | T:
+        return x
+
+    def method[S](self, x: S | T) -> S | T:
+        return x
+
+reveal_type(WithOverloadedMethod[int].method)  # revealed: Overload[(self, x: int) -> int, (self, x: S) -> S | int]
+```
+
 ## Cyclic class definitions
 
 ### F-bounded quantification
@@ -358,7 +382,7 @@ Here, `Sub` is not a generic class, since it fills its superclass's type paramet
 class Base[T]: ...
 class Sub(Base[Sub]): ...
 
-reveal_type(Sub)  # revealed: Literal[Sub]
+reveal_type(Sub)  # revealed: <class 'Sub'>
 ```
 
 #### With string forward references
@@ -369,7 +393,7 @@ A similar case can work in a non-stub file, if forward references are stringifie
 class Base[T]: ...
 class Sub(Base["Sub"]): ...
 
-reveal_type(Sub)  # revealed: Literal[Sub]
+reveal_type(Sub)  # revealed: <class 'Sub'>
 ```
 
 #### Without string forward references

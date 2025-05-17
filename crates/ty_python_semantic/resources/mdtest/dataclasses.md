@@ -181,7 +181,7 @@ class D:
     class_literal: TypeOf[SomeClass]
     class_subtype_of: type[SomeClass]
 
-# revealed: (function_literal: def some_function() -> None, class_literal: Literal[SomeClass], class_subtype_of: type[SomeClass]) -> None
+# revealed: (function_literal: def some_function() -> None, class_literal: <class 'SomeClass'>, class_subtype_of: type[SomeClass]) -> None
 reveal_type(D.__init__)
 ```
 
@@ -489,7 +489,7 @@ class DataWithDescription[T]:
     data: T
     description: str
 
-reveal_type(DataWithDescription[int])  # revealed: Literal[DataWithDescription[int]]
+reveal_type(DataWithDescription[int])  # revealed: <class 'DataWithDescription[int]'>
 
 d_int = DataWithDescription[int](1, "description")  # OK
 reveal_type(d_int.data)  # revealed: int
@@ -616,6 +616,47 @@ reveal_type(C.__init__)  # revealed: (field: str | int = int) -> None
 
 To do
 
+## `dataclass.fields`
+
+Dataclasses have a special `__dataclass_fields__` class variable member. The `DataclassInstance`
+protocol checks for the presence of this attribute. It is used in the `dataclasses.fields` and
+`dataclasses.asdict` functions, for example:
+
+```py
+from dataclasses import dataclass, fields, asdict
+
+@dataclass
+class Foo:
+    x: int
+
+foo = Foo(1)
+
+reveal_type(foo.__dataclass_fields__)  # revealed: dict[str, Field[Any]]
+reveal_type(fields(Foo))  # revealed: tuple[Field[Any], ...]
+reveal_type(asdict(foo))  # revealed: dict[str, Any]
+```
+
+The class objects themselves also have a `__dataclass_fields__` attribute:
+
+```py
+reveal_type(Foo.__dataclass_fields__)  # revealed: dict[str, Field[Any]]
+```
+
+They can be passed into `fields` as well, because it also accepts `type[DataclassInstance]`
+arguments:
+
+```py
+reveal_type(fields(Foo))  # revealed: tuple[Field[Any], ...]
+```
+
+But calling `asdict` on the class object is not allowed:
+
+```py
+# TODO: this should be a invalid-argument-type error, but we don't properly check the
+# types (and more importantly, the `ClassVar` type qualifier) of protocol members yet.
+asdict(Foo)
+```
+
 ## Other special cases
 
 ### `dataclasses.dataclass`
@@ -675,7 +716,7 @@ from dataclasses import dataclass
 class C:
     x: int
 
-# error: [unresolved-attribute] "Attribute `x` can only be accessed on instances, not on the class object `Literal[C]` itself."
+# error: [unresolved-attribute] "Attribute `x` can only be accessed on instances, not on the class object `<class 'C'>` itself."
 C.x
 ```
 
@@ -715,8 +756,8 @@ class Person:
     name: str
     age: int | None = None
 
-reveal_type(type(Person))  # revealed: Literal[type]
-reveal_type(Person.__mro__)  # revealed: tuple[Literal[Person], Literal[object]]
+reveal_type(type(Person))  # revealed: <class 'type'>
+reveal_type(Person.__mro__)  # revealed: tuple[<class 'Person'>, <class 'object'>]
 ```
 
 The generated methods have the following signatures:

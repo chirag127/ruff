@@ -8,19 +8,20 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use lsp_types::{ClientCapabilities, TextDocumentContentChangeEvent, Url};
 
-use ruff_db::files::{system_path_to_file, File};
-use ruff_db::system::SystemPath;
 use ruff_db::Db;
+use ruff_db::files::{File, system_path_to_file};
+use ruff_db::system::SystemPath;
 use ty_project::{ProjectDatabase, ProjectMetadata};
 
 use crate::document::{DocumentKey, DocumentVersion, NotebookDocument};
-use crate::system::{url_to_any_system_path, AnySystemPath, LSPSystem};
+use crate::system::{AnySystemPath, LSPSystem, url_to_any_system_path};
 use crate::{PositionEncoding, TextDocument};
 
 pub(crate) use self::capabilities::ResolvedClientCapabilities;
 pub use self::index::DocumentQuery;
 pub(crate) use self::settings::AllSettings;
 pub use self::settings::ClientSettings;
+pub(crate) use self::settings::Experimental;
 
 mod capabilities;
 pub(crate) mod index;
@@ -208,6 +209,10 @@ impl Session {
             session: self,
             index,
         }
+    }
+
+    pub(crate) fn client_capabilities(&self) -> &ResolvedClientCapabilities {
+        &self.resolved_client_capabilities
     }
 }
 

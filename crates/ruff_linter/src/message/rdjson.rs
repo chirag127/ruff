@@ -2,7 +2,7 @@ use std::io::Write;
 
 use serde::ser::SerializeSeq;
 use serde::{Serialize, Serializer};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use ruff_diagnostics::Edit;
 use ruff_source_file::SourceCode;
@@ -57,7 +57,8 @@ impl Serialize for ExpandedMessages<'_> {
 }
 
 fn message_to_rdjson_value(message: &Message) -> Value {
-    let source_code = message.source_file().to_source_code();
+    let source_file = message.source_file();
+    let source_code = source_file.to_source_code();
 
     let start_location = source_code.line_column(message.start());
     let end_location = source_code.line_column(message.end());
@@ -118,10 +119,10 @@ fn rdjson_range(start: LineColumn, end: LineColumn) -> Value {
 mod tests {
     use insta::assert_snapshot;
 
+    use crate::message::RdjsonEmitter;
     use crate::message::tests::{
         capture_emitter_output, create_messages, create_syntax_error_messages,
     };
-    use crate::message::RdjsonEmitter;
 
     #[test]
     fn output() {

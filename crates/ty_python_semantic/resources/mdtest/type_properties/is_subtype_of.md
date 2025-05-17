@@ -118,7 +118,7 @@ static_assert(is_subtype_of(Literal[b"foo"], bytes))
 static_assert(is_subtype_of(Literal[b"foo"], object))
 ```
 
-## Tuple types
+## Heterogeneous tuple types
 
 ```py
 from ty_extensions import is_subtype_of, static_assert
@@ -150,8 +150,36 @@ static_assert(not is_subtype_of(tuple[B1, B2], tuple[Unrelated, Unrelated]))
 static_assert(not is_subtype_of(tuple[B1, B2], tuple[()]))
 static_assert(not is_subtype_of(tuple[B1, B2], tuple[A1]))
 static_assert(not is_subtype_of(tuple[B1, B2], tuple[A1, A2, Unrelated]))
+static_assert(is_subtype_of(tuple[int], tuple[object, ...]))
+```
 
-static_assert(is_subtype_of(tuple[int], tuple))
+## Subtyping of heterogeneous tuple types and homogeneous tuple types
+
+While a homogeneous tuple type is not a subtype of any heterogeneous tuple types, a heterogeneous
+tuple type can be a subtype of a homogeneous tuple type, and homogeneous tuple types can be subtypes
+of `Sequence`:
+
+```py
+from typing import Literal, Any, Sequence
+from ty_extensions import static_assert, is_subtype_of, Not, AlwaysFalsy
+
+static_assert(is_subtype_of(tuple[Literal[1], Literal[2]], tuple[Literal[1, 2], ...]))
+static_assert(is_subtype_of(tuple[Literal[1], Literal[2]], tuple[int, ...]))
+static_assert(is_subtype_of(tuple[Literal[1], Literal[2]], tuple[int | str, ...]))
+static_assert(is_subtype_of(tuple[Literal[1], Literal[2]], tuple[Not[AlwaysFalsy], ...]))
+static_assert(is_subtype_of(tuple[Literal[1], Literal[2]], Sequence[int]))
+static_assert(is_subtype_of(tuple[int, ...], Sequence[int]))
+
+static_assert(is_subtype_of(tuple[()], tuple[Literal[1, 2], ...]))
+static_assert(is_subtype_of(tuple[()], tuple[int, ...]))
+static_assert(is_subtype_of(tuple[()], tuple[int | str, ...]))
+static_assert(is_subtype_of(tuple[()], tuple[Not[AlwaysFalsy], ...]))
+static_assert(is_subtype_of(tuple[()], Sequence[int]))
+
+static_assert(not is_subtype_of(tuple[Literal[1], Literal[2]], tuple[Any, ...]))
+static_assert(not is_subtype_of(tuple[int, int], tuple[str, ...]))
+static_assert(not is_subtype_of(tuple[int, ...], Sequence[Any]))
+static_assert(not is_subtype_of(tuple[Any, ...], Sequence[int]))
 ```
 
 ## Union types
@@ -334,10 +362,14 @@ static_assert(is_subtype_of(TypeOf[typing], ModuleType))
 
 ### Slice literals
 
+The type of a slice literal is currently inferred as a specialization of `slice`.
+
 ```py
 from ty_extensions import TypeOf, is_subtype_of, static_assert
 
-static_assert(is_subtype_of(TypeOf[1:2:3], slice))
+# slice's default specialization is slice[Any, Any, Any], which does not participate in subtyping.
+static_assert(not is_subtype_of(TypeOf[1:2:3], slice))
+static_assert(is_subtype_of(TypeOf[1:2:3], slice[int]))
 ```
 
 ### Special forms

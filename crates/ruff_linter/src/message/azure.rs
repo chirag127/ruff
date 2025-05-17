@@ -17,7 +17,7 @@ impl Emitter for AzureEmitter {
         context: &EmitterContext,
     ) -> anyhow::Result<()> {
         for message in messages {
-            let location = if context.is_notebook(message.filename()) {
+            let location = if context.is_notebook(&message.filename()) {
                 // We can't give a reasonable location for the structured formats,
                 // so we show one that's clearly a fallback
                 LineColumn::default()
@@ -47,10 +47,10 @@ impl Emitter for AzureEmitter {
 mod tests {
     use insta::assert_snapshot;
 
+    use crate::message::AzureEmitter;
     use crate::message::tests::{
         capture_emitter_output, create_messages, create_syntax_error_messages,
     };
-    use crate::message::AzureEmitter;
 
     #[test]
     fn output() {

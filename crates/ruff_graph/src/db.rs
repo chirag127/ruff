@@ -9,8 +9,8 @@ use ruff_db::{Db as SourceDb, Upcast};
 use ruff_python_ast::PythonVersion;
 use ty_python_semantic::lint::{LintRegistry, RuleSelection};
 use ty_python_semantic::{
-    default_lint_registry, Db, Program, ProgramSettings, PythonPath, PythonPlatform,
-    SearchPathSettings,
+    Db, Program, ProgramSettings, PythonPath, PythonPlatform, SearchPathSettings,
+    default_lint_registry,
 };
 
 static EMPTY_VENDORED: std::sync::LazyLock<VendoredFileSystem> = std::sync::LazyLock::new(|| {
@@ -88,8 +88,8 @@ impl Db for ModuleDb {
         !file.path(self).is_vendored_path()
     }
 
-    fn rule_selection(&self) -> Arc<RuleSelection> {
-        self.rule_selection.clone()
+    fn rule_selection(&self) -> &RuleSelection {
+        &self.rule_selection
     }
 
     fn lint_registry(&self) -> &LintRegistry {
@@ -98,6 +98,4 @@ impl Db for ModuleDb {
 }
 
 #[salsa::db]
-impl salsa::Database for ModuleDb {
-    fn salsa_event(&self, _event: &dyn Fn() -> salsa::Event) {}
-}
+impl salsa::Database for ModuleDb {}

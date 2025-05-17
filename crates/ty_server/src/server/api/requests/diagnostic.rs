@@ -4,12 +4,12 @@ use lsp_types::request::DocumentDiagnosticRequest;
 use lsp_types::{
     Diagnostic, DiagnosticSeverity, DiagnosticTag, DocumentDiagnosticParams,
     DocumentDiagnosticReport, DocumentDiagnosticReportResult, FullDocumentDiagnosticReport,
-    NumberOrString, Range, RelatedFullDocumentDiagnosticReport, Url,
+    NumberOrString, Range, RelatedFullDocumentDiagnosticReport,
 };
 
 use crate::document::ToRangeExt;
 use crate::server::api::traits::{BackgroundDocumentRequestHandler, RequestHandler};
-use crate::server::{client::Notifier, Result};
+use crate::server::{Result, client::Notifier};
 use crate::session::DocumentSnapshot;
 use ruff_db::diagnostic::Severity;
 use ruff_db::source::{line_index, source_text};
@@ -22,7 +22,7 @@ impl RequestHandler for DocumentDiagnosticRequestHandler {
 }
 
 impl BackgroundDocumentRequestHandler for DocumentDiagnosticRequestHandler {
-    fn document_url(params: &DocumentDiagnosticParams) -> Cow<Url> {
+    fn document_url(params: &DocumentDiagnosticParams) -> Cow<lsp_types::Url> {
         Cow::Borrowed(&params.text_document.uri)
     }
 
@@ -76,8 +76,9 @@ fn to_lsp_diagnostic(
     encoding: crate::PositionEncoding,
 ) -> Diagnostic {
     let range = if let Some(span) = diagnostic.primary_span() {
-        let index = line_index(db.upcast(), span.file());
-        let source = source_text(db.upcast(), span.file());
+        let file = span.expect_ty_file();
+        let index = line_index(db.upcast(), file);
+        let source = source_text(db.upcast(), file);
 
         span.range()
             .map(|range| range.to_lsp_range(&source, &index, encoding))
@@ -104,12 +105,23 @@ fn to_lsp_diagnostic(
         })
         .filter(|mapped_tags| !mapped_tags.is_empty());
 
+    let code_description = diagnostic
+        .id()
+        .is_lint()
+        .then(|| {
+            Some(lsp_types::CodeDescription {
+                href: lsp_types::Url::parse(&format!("https://ty.dev/rules#{}", diagnostic.id()))
+                    .ok()?,
+            })
+        })
+        .flatten();
+
     Diagnostic {
         range,
         severity: Some(severity),
         tags,
         code: Some(NumberOrString::String(diagnostic.id().to_string())),
-        code_description: None,
+        code_description,
         source: Some("ty".into()),
         message: diagnostic.concise_message().to_string(),
         related_information: None,
