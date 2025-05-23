@@ -1,12 +1,13 @@
 use std::collections::VecDeque;
 use std::ops::Deref;
 
-use rustc_hash::FxHashSet;
+use indexmap::IndexMap;
+use rustc_hash::FxBuildHasher;
 
+use crate::Db;
 use crate::types::class_base::ClassBase;
 use crate::types::generics::Specialization;
-use crate::types::{ClassLiteral, ClassType, Type};
-use crate::Db;
+use crate::types::{ClassLiteral, ClassType, KnownInstanceType, Type};
 
 /// The inferred method resolution order of a given class.
 ///
@@ -47,12 +48,12 @@ impl<'db> Mro<'db> {
     /// [`super::infer::TypeInferenceBuilder::infer_region_scope`].)
     pub(super) fn of_class(
         db: &'db dyn Db,
-        class: ClassLiteral<'db>,
+        class_literal: ClassLiteral<'db>,
         specialization: Option<Specialization<'db>>,
     ) -> Result<Self, MroError<'db>> {
-        Self::of_class_impl(db, class, specialization).map_err(|err| {
-            err.into_mro_error(db, class.apply_optional_specialization(db, specialization))
-        })
+        let class = class_literal.apply_optional_specialization(db, specialization);
+        Self::of_class_impl(db, class, class_literal.explicit_bases(db), specialization)
+            .map_err(|err| err.into_mro_error(db, class))
     }
 
     pub(super) fn from_error(db: &'db dyn Db, class: ClassType<'db>) -> Self {
@@ -65,27 +66,16 @@ impl<'db> Mro<'db> {
 
     fn of_class_impl(
         db: &'db dyn Db,
-        class: ClassLiteral<'db>,
+        class: ClassType<'db>,
+        bases: &[Type<'db>],
         specialization: Option<Specialization<'db>>,
     ) -> Result<Self, MroErrorKind<'db>> {
-        let class_bases = class.explicit_bases(db);
-
-        if !class_bases.is_empty() && class.inheritance_cycle(db).is_some() {
-            // We emit errors for cyclically defined classes elsewhere.
-            // It's important that we don't even try to infer the MRO for a cyclically defined class,
-            // or we'll end up in an infinite loop.
-            return Ok(Mro::from_error(
-                db,
-                class.apply_optional_specialization(db, specialization),
-            ));
-        }
-
-        match class_bases {
+        match bases {
             // `builtins.object` is the special case:
             // the only class in Python that has an MRO with length <2
             [] if class.is_object(db) => Ok(Self::from([
                 // object is not generic, so the default specialization should be a no-op
-                ClassBase::Class(class.apply_optional_specialization(db, specialization)),
+                ClassBase::Class(class),
             ])),
 
             // All other classes in Python have an MRO with length >=2.
@@ -101,40 +91,82 @@ impl<'db> Mro<'db> {
             // >>> Foo.__mro__
             // (<class '__main__.Foo'>, <class 'object'>)
             // ```
-            [] => Ok(Self::from([
-                ClassBase::Class(class.apply_optional_specialization(db, specialization)),
-                ClassBase::object(db),
-            ])),
+            [] => {
+                // e.g. `class Foo[T]: ...` implicitly has `Generic` inserted into its bases
+                if class.is_generic() {
+                    Ok(Self::from([
+                        ClassBase::Class(class),
+                        ClassBase::Generic,
+                        ClassBase::object(db),
+                    ]))
+                } else {
+                    Ok(Self::from([ClassBase::Class(class), ClassBase::object(db)]))
+                }
+            }
 
             // Fast path for a class that has only a single explicit base.
             //
             // This *could* theoretically be handled by the final branch below,
             // but it's a common case (i.e., worth optimizing for),
             // and the `c3_merge` function requires lots of allocations.
-            [single_base] => ClassBase::try_from_type(db, *single_base).map_or_else(
-                || Err(MroErrorKind::InvalidBases(Box::from([(0, *single_base)]))),
-                |single_base| {
-                    Ok(std::iter::once(ClassBase::Class(
-                        class.apply_optional_specialization(db, specialization),
-                    ))
-                    .chain(single_base.mro(db))
-                    .collect())
-                },
-            ),
+            [single_base]
+                if !matches!(
+                    single_base,
+                    Type::GenericAlias(_)
+                        | Type::KnownInstance(
+                            KnownInstanceType::Generic(_) | KnownInstanceType::Protocol(_)
+                        )
+                ) =>
+            {
+                ClassBase::try_from_type(db, *single_base).map_or_else(
+                    || Err(MroErrorKind::InvalidBases(Box::from([(0, *single_base)]))),
+                    |single_base| {
+                        if single_base.has_cyclic_mro(db) {
+                            Err(MroErrorKind::InheritanceCycle)
+                        } else {
+                            Ok(std::iter::once(ClassBase::Class(class))
+                                .chain(single_base.mro(db, specialization))
+                                .collect())
+                        }
+                    },
+                )
+            }
 
             // The class has multiple explicit bases.
             //
             // We'll fallback to a full implementation of the C3-merge algorithm to determine
             // what MRO Python will give this class at runtime
             // (if an MRO is indeed resolvable at all!)
-            multiple_bases => {
-                let mut valid_bases = vec![];
+            original_bases => {
+                let mut resolved_bases = vec![];
                 let mut invalid_bases = vec![];
 
-                for (i, base) in multiple_bases.iter().enumerate() {
-                    match ClassBase::try_from_type(db, *base) {
-                        Some(valid_base) => valid_bases.push(valid_base),
-                        None => invalid_bases.push((i, *base)),
+                for (i, base) in original_bases.iter().enumerate() {
+                    // This emulates the behavior of `typing._GenericAlias.__mro_entries__` at
+                    // <https://github.com/python/cpython/blob/ad42dc1909bdf8ec775b63fb22ed48ff42797a17/Lib/typing.py#L1487-L1500>.
+                    //
+                    // Note that emit a diagnostic for inheriting from bare (unsubscripted) `Generic` elsewhere
+                    // (see `infer::TypeInferenceBuilder::check_class_definitions`),
+                    // which is why we only care about `KnownInstanceType::Generic(Some(_))`,
+                    // not `KnownInstanceType::Generic(None)`.
+                    if let Type::KnownInstance(KnownInstanceType::Generic(Some(_))) = base {
+                        if original_bases
+                            .contains(&Type::KnownInstance(KnownInstanceType::Protocol(None)))
+                        {
+                            continue;
+                        }
+                        if original_bases[i + 1..]
+                            .iter()
+                            .any(|b| b.is_generic_alias() && b != base)
+                        {
+                            continue;
+                        }
+                        resolved_bases.push(ClassBase::Generic);
+                    } else {
+                        match ClassBase::try_from_type(db, *base) {
+                            Some(valid_base) => resolved_bases.push(valid_base),
+                            None => invalid_bases.push((i, *base)),
+                        }
                     }
                 }
 
@@ -142,36 +174,83 @@ impl<'db> Mro<'db> {
                     return Err(MroErrorKind::InvalidBases(invalid_bases.into_boxed_slice()));
                 }
 
-                let mut seqs = vec![VecDeque::from([ClassBase::Class(
-                    class.apply_optional_specialization(db, specialization),
-                )])];
-                for base in &valid_bases {
-                    seqs.push(base.mro(db).collect());
+                let mut seqs = vec![VecDeque::from([ClassBase::Class(class)])];
+                for base in &resolved_bases {
+                    if base.has_cyclic_mro(db) {
+                        return Err(MroErrorKind::InheritanceCycle);
+                    }
+                    seqs.push(base.mro(db, specialization).collect());
                 }
-                seqs.push(valid_bases.iter().copied().collect());
-
-                c3_merge(seqs).ok_or_else(|| {
-                    let mut seen_bases = FxHashSet::default();
-                    let mut duplicate_bases = vec![];
-                    for (index, base) in valid_bases
+                seqs.push(
+                    resolved_bases
                         .iter()
-                        .enumerate()
-                        .filter_map(|(index, base)| Some((index, base.into_class()?)))
-                    {
-                        if !seen_bases.insert(base) {
-                            let (base_class_literal, _) = base.class_literal(db);
-                            duplicate_bases.push((index, base_class_literal));
+                        .map(|base| base.apply_optional_specialization(db, specialization))
+                        .collect(),
+                );
+
+                if let Some(mro) = c3_merge(seqs) {
+                    return Ok(mro);
+                }
+
+                let mut duplicate_dynamic_bases = false;
+
+                let duplicate_bases: Vec<DuplicateBaseError<'db>> = {
+                    let mut base_to_indices: IndexMap<ClassBase<'db>, Vec<usize>, FxBuildHasher> =
+                        IndexMap::default();
+
+                    // We need to iterate over `original_bases` here rather than `resolved_bases`
+                    // so that we get the correct index of the duplicate bases if there were any
+                    // (`resolved_bases` may be a longer list than `original_bases`!). However, we
+                    // need to use a `ClassBase` rather than a `Type` as the key type for the
+                    // `base_to_indices` map so that a class such as
+                    // `class Foo(Protocol[T], Protocol): ...` correctly causes us to emit a
+                    // `duplicate-base` diagnostic (matching the runtime behaviour) rather than an
+                    // `inconsistent-mro` diagnostic (which would be accurate -- but not nearly as
+                    // precise!).
+                    for (index, base) in original_bases.iter().enumerate() {
+                        let Some(base) = ClassBase::try_from_type(db, *base) else {
+                            continue;
+                        };
+                        base_to_indices.entry(base).or_default().push(index);
+                    }
+
+                    let mut errors = vec![];
+
+                    for (base, indices) in base_to_indices {
+                        let Some((first_index, later_indices)) = indices.split_first() else {
+                            continue;
+                        };
+                        if later_indices.is_empty() {
+                            continue;
+                        }
+                        match base {
+                            ClassBase::Class(_) | ClassBase::Generic | ClassBase::Protocol => {
+                                errors.push(DuplicateBaseError {
+                                    duplicate_base: base,
+                                    first_index: *first_index,
+                                    later_indices: later_indices.iter().copied().collect(),
+                                });
+                            }
+                            ClassBase::Dynamic(_) => duplicate_dynamic_bases = true,
                         }
                     }
 
-                    if duplicate_bases.is_empty() {
-                        MroErrorKind::UnresolvableMro {
-                            bases_list: valid_bases.into_boxed_slice(),
-                        }
+                    errors
+                };
+
+                if duplicate_bases.is_empty() {
+                    if duplicate_dynamic_bases {
+                        Ok(Mro::from_error(db, class))
                     } else {
-                        MroErrorKind::DuplicateBases(duplicate_bases.into_boxed_slice())
+                        Err(MroErrorKind::UnresolvableMro {
+                            bases_list: original_bases.iter().copied().collect(),
+                        })
                     }
-                })
+                } else {
+                    Err(MroErrorKind::DuplicateBases(
+                        duplicate_bases.into_boxed_slice(),
+                    ))
+                }
             }
         }
     }
@@ -296,6 +375,15 @@ pub(super) struct MroError<'db> {
 }
 
 impl<'db> MroError<'db> {
+    /// Construct an MRO error of kind `InheritanceCycle`.
+    pub(super) fn cycle(db: &'db dyn Db, class: ClassType<'db>) -> Self {
+        MroErrorKind::InheritanceCycle.into_mro_error(db, class)
+    }
+
+    pub(super) fn is_cycle(&self) -> bool {
+        matches!(self.kind, MroErrorKind::InheritanceCycle)
+    }
+
     /// Return an [`MroErrorKind`] variant describing why we could not resolve the MRO for this class.
     pub(super) fn reason(&self) -> &MroErrorKind<'db> {
         &self.kind
@@ -325,17 +413,16 @@ pub(super) enum MroErrorKind<'db> {
     InvalidBases(Box<[(usize, Type<'db>)]>),
 
     /// The class has one or more duplicate bases.
-    ///
-    /// This variant records the indices and [`ClassLiteral`]s
-    /// of the duplicate bases. The indices are the indices of nodes
-    /// in the bases list of the class's [`StmtClassDef`](ruff_python_ast::StmtClassDef) node.
-    /// Each index is the index of a node representing a duplicate base.
-    DuplicateBases(Box<[(usize, ClassLiteral<'db>)]>),
+    /// See [`DuplicateBaseError`] for more details.
+    DuplicateBases(Box<[DuplicateBaseError<'db>]>),
+
+    /// A cycle was encountered resolving the class' bases.
+    InheritanceCycle,
 
     /// The MRO is otherwise unresolvable through the C3-merge algorithm.
     ///
     /// See [`c3_merge`] for more details.
-    UnresolvableMro { bases_list: Box<[ClassBase<'db>]> },
+    UnresolvableMro { bases_list: Box<[Type<'db>]> },
 }
 
 impl<'db> MroErrorKind<'db> {
@@ -345,6 +432,17 @@ impl<'db> MroErrorKind<'db> {
             fallback_mro: Mro::from_error(db, class),
         }
     }
+}
+
+/// Error recording the fact that a class definition was found to have duplicate bases.
+#[derive(Debug, PartialEq, Eq, salsa::Update)]
+pub(super) struct DuplicateBaseError<'db> {
+    /// The base that is duplicated in the class's bases list.
+    pub(super) duplicate_base: ClassBase<'db>,
+    /// The index of the first occurrence of the base in the class's bases list.
+    pub(super) first_index: usize,
+    /// The indices of the base's later occurrences in the class's bases list.
+    pub(super) later_indices: Box<[usize]>,
 }
 
 /// Implementation of the [C3-merge algorithm] for calculating a Python class's

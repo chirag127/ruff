@@ -1,6 +1,7 @@
 use crate::server::schedule::Task;
 use crate::session::Session;
-use crate::system::{url_to_any_system_path, AnySystemPath};
+use crate::system::{AnySystemPath, url_to_any_system_path};
+use anyhow::anyhow;
 use lsp_server as server;
 use lsp_types::notification::Notification;
 
@@ -14,7 +15,7 @@ use requests as request;
 
 use self::traits::{NotificationHandler, RequestHandler};
 
-use super::{client::Responder, schedule::BackgroundSchedule, Result};
+use super::{Result, client::Responder, schedule::BackgroundSchedule};
 
 pub(super) fn request<'a>(req: server::Request) -> Task<'a> {
     let id = req.id.clone();
@@ -44,13 +45,17 @@ pub(super) fn request<'a>(req: server::Request) -> Task<'a> {
 
         method => {
             tracing::warn!("Received request {method} which does not have a handler");
-            return Task::nothing();
+            let result: Result<()> = Err(Error::new(
+                anyhow!("Unknown request"),
+                server::ErrorCode::MethodNotFound,
+            ));
+            return Task::immediate(id, result);
         }
     }
     .unwrap_or_else(|err| {
         tracing::error!("Encountered error when routing request with ID {id}: {err}");
         show_err_msg!(
-            "Ruff failed to handle a request from the editor. Check the logs for more details."
+            "ty failed to handle a request from the editor. Check the logs for more details."
         );
         let result: Result<()> = Err(err);
         Task::immediate(id, result)
@@ -59,19 +64,28 @@ pub(super) fn request<'a>(req: server::Request) -> Task<'a> {
 
 pub(super) fn notification<'a>(notif: server::Notification) -> Task<'a> {
     match notif.method.as_str() {
-        notification::DidCloseTextDocumentHandler::METHOD => local_notification_task::<notification::DidCloseTextDocumentHandler>(notif),
-        notification::DidOpenTextDocumentHandler::METHOD => local_notification_task::<notification::DidOpenTextDocumentHandler>(notif),
-        notification::DidChangeTextDocumentHandler::METHOD => local_notification_task::<notification::DidChangeTextDocumentHandler>(notif),
+        notification::DidCloseTextDocumentHandler::METHOD => {
+            local_notification_task::<notification::DidCloseTextDocumentHandler>(notif)
+        }
+        notification::DidOpenTextDocumentHandler::METHOD => {
+            local_notification_task::<notification::DidOpenTextDocumentHandler>(notif)
+        }
+        notification::DidChangeTextDocumentHandler::METHOD => {
+            local_notification_task::<notification::DidChangeTextDocumentHandler>(notif)
+        }
         notification::DidOpenNotebookHandler::METHOD => {
             local_notification_task::<notification::DidOpenNotebookHandler>(notif)
         }
         notification::DidCloseNotebookHandler::METHOD => {
             local_notification_task::<notification::DidCloseNotebookHandler>(notif)
         }
+        notification::DidChangeWatchedFiles::METHOD => {
+            local_notification_task::<notification::DidChangeWatchedFiles>(notif)
+        }
         lsp_types::notification::SetTrace::METHOD => {
             tracing::trace!("Ignoring `setTrace` notification");
             return Task::nothing();
-        },
+        }
 
         method => {
             tracing::warn!("Received notification {method} which does not have a handler.");
@@ -80,7 +94,9 @@ pub(super) fn notification<'a>(notif: server::Notification) -> Task<'a> {
     }
     .unwrap_or_else(|err| {
         tracing::error!("Encountered error when routing notification: {err}");
-        show_err_msg!("Ruff failed to handle a notification from the editor. Check the logs for more details.");
+        show_err_msg!(
+            "ty failed to handle a notification from the editor. Check the logs for more details."
+        );
         Task::nothing()
     })
 }
@@ -109,9 +125,10 @@ fn background_request_task<'a, R: traits::BackgroundDocumentRequestHandler>(
         let url = R::document_url(&params).into_owned();
 
         let Ok(path) = url_to_any_system_path(&url) else {
+            tracing::warn!("Ignoring request for invalid `{url}`");
             return Box::new(|_, _| {});
         };
-        let db = match path {
+        let db = match &path {
             AnySystemPath::System(path) => match session.project_db_for_path(path.as_std_path()) {
                 Some(db) => db.clone(),
                 None => session.default_project_db().clone(),
@@ -120,12 +137,13 @@ fn background_request_task<'a, R: traits::BackgroundDocumentRequestHandler>(
         };
 
         let Some(snapshot) = session.take_snapshot(url) else {
+            tracing::warn!("Ignoring request because snapshot for path `{path:?}` doesn't exist.");
             return Box::new(|_, _| {});
         };
 
         Box::new(move |notifier, responder| {
             let _span = tracing::trace_span!("request", %id, method = R::METHOD).entered();
-            let result = R::run_with_snapshot(snapshot, db, notifier, params);
+            let result = R::run_with_snapshot(&db, snapshot, notifier, params);
             respond::<R>(id, result, &responder);
         })
     }))
@@ -139,7 +157,7 @@ fn local_notification_task<'a, N: traits::SyncNotificationHandler>(
         let _span = tracing::trace_span!("notification", method = N::METHOD).entered();
         if let Err(err) = N::run(session, notifier, requester, params) {
             tracing::error!("An error occurred while running {id}: {err}");
-            show_err_msg!("Ruff encountered a problem. Check the logs for more details.");
+            show_err_msg!("ty encountered a problem. Check the logs for more details.");
         }
     }))
 }
@@ -151,15 +169,18 @@ fn background_notification_thread<'a, N: traits::BackgroundDocumentNotificationH
 ) -> super::Result<Task<'a>> {
     let (id, params) = cast_notification::<N>(req)?;
     Ok(Task::background(schedule, move |session: &Session| {
-        // TODO(jane): we should log an error if we can't take a snapshot.
-        let Some(snapshot) = session.take_snapshot(N::document_url(&params).into_owned()) else {
+        let url = N::document_url(&params);
+        let Some(snapshot) = session.take_snapshot((*url).clone()) else {
+            tracing::debug!(
+                "Ignoring notification because snapshot for url `{url}` doesn't exist."
+            );
             return Box::new(|_, _| {});
         };
         Box::new(move |notifier, _| {
             let _span = tracing::trace_span!("notification", method = N::METHOD).entered();
             if let Err(err) = N::run_with_snapshot(snapshot, notifier, params) {
                 tracing::error!("An error occurred while running {id}: {err}");
-                show_err_msg!("Ruff encountered a problem. Check the logs for more details.");
+                show_err_msg!("ty encountered a problem. Check the logs for more details.");
             }
         })
     }))
@@ -204,7 +225,7 @@ fn respond<Req>(
 {
     if let Err(err) = &result {
         tracing::error!("An error occurred with request ID {id}: {err}");
-        show_err_msg!("Ruff encountered a problem. Check the logs for more details.");
+        show_err_msg!("ty encountered a problem. Check the logs for more details.");
     }
     if let Err(err) = responder.respond(id, result) {
         tracing::error!("Failed to send response: {err}");

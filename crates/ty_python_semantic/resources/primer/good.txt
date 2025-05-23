@@ -9,6 +9,7 @@ aioredis
 aiortc
 alectryon
 alerta
+altair
 anyio
 apprise
 arviz
@@ -24,6 +25,7 @@ boostedblob
 check-jsonschema
 cki-lib
 cloud-init
+colour
 com2ann
 comtypes
 cwltool
@@ -45,11 +47,11 @@ imagehash
 isort
 itsdangerous
 janus
-jax
 jinja
 koda-validate
 kopf
 kornia
+manticore
 materialize
 meson
 mitmproxy
@@ -66,11 +68,9 @@ openlibrary
 operator
 optuna
 paasta
-packaging
 paroxython
 parso
 pegen
-pip
 poetry
 porcupine
 ppb-vector
@@ -82,7 +82,6 @@ pydantic
 pyinstrument
 pyjwt
 pylox
-pyodide
 pyp
 pyppeteer
 pytest
@@ -96,7 +95,6 @@ rotki
 schema_salad
 scipy
 scrapy
-setuptools
 sockeye
 speedrun.com_global_scoreboard_webapp
 sphinx

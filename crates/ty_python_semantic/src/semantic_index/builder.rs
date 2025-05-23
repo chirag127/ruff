@@ -6,13 +6,13 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use ruff_db::files::File;
 use ruff_db::parsed::ParsedModule;
-use ruff_db::source::{source_text, SourceText};
+use ruff_db::source::{SourceText, source_text};
 use ruff_index::IndexVec;
 use ruff_python_ast::name::Name;
-use ruff_python_ast::visitor::{walk_expr, walk_pattern, walk_stmt, Visitor};
+use ruff_python_ast::visitor::{Visitor, walk_expr, walk_pattern, walk_stmt};
 use ruff_python_ast::{self as ast, PySourceType, PythonVersion};
 use ruff_python_parser::semantic_errors::{
-    SemanticSyntaxChecker, SemanticSyntaxContext, SemanticSyntaxError,
+    SemanticSyntaxChecker, SemanticSyntaxContext, SemanticSyntaxError, SemanticSyntaxErrorKind,
 };
 use ruff_text_size::TextRange;
 
@@ -20,8 +20,9 @@ use crate::ast_node_ref::AstNodeRef;
 use crate::module_name::ModuleName;
 use crate::module_resolver::resolve_module;
 use crate::node_key::NodeKey;
-use crate::semantic_index::ast_ids::node_key::ExpressionNodeKey;
+use crate::semantic_index::SemanticIndex;
 use crate::semantic_index::ast_ids::AstIdsBuilder;
+use crate::semantic_index::ast_ids::node_key::ExpressionNodeKey;
 use crate::semantic_index::definition::{
     AnnotatedAssignmentDefinitionKind, AnnotatedAssignmentDefinitionNodeRef,
     AssignmentDefinitionKind, AssignmentDefinitionNodeRef, ComprehensionDefinitionKind,
@@ -47,7 +48,6 @@ use crate::semantic_index::use_def::{
 use crate::semantic_index::visibility_constraints::{
     ScopedVisibilityConstraintId, VisibilityConstraintsBuilder,
 };
-use crate::semantic_index::SemanticIndex;
 use crate::unpack::{Unpack, UnpackKind, UnpackPosition, UnpackValue};
 use crate::{Db, Program};
 
@@ -106,6 +106,7 @@ pub(super) struct SemanticIndexBuilder<'db> {
     use_def_maps: IndexVec<FileScopeId, UseDefMapBuilder<'db>>,
     scopes_by_node: FxHashMap<NodeWithScopeKey, FileScopeId>,
     scopes_by_expression: FxHashMap<ExpressionNodeKey, FileScopeId>,
+    globals_by_scope: FxHashMap<FileScopeId, FxHashSet<ScopedSymbolId>>,
     definitions_by_node: FxHashMap<DefinitionNodeKey, Definitions<'db>>,
     expressions_by_node: FxHashMap<ExpressionNodeKey, Expression<'db>>,
     imported_modules: FxHashSet<ModuleName>,
@@ -144,6 +145,7 @@ impl<'db> SemanticIndexBuilder<'db> {
             scopes_by_node: FxHashMap::default(),
             definitions_by_node: FxHashMap::default(),
             expressions_by_node: FxHashMap::default(),
+            globals_by_scope: FxHashMap::default(),
 
             imported_modules: FxHashSet::default(),
             generator_functions: FxHashSet::default(),
@@ -436,8 +438,7 @@ impl<'db> SemanticIndexBuilder<'db> {
         let (definition, num_definitions) =
             self.push_additional_definition(symbol, definition_node);
         debug_assert_eq!(
-            num_definitions,
-            1,
+            num_definitions, 1,
             "Attempted to create multiple `Definition`s associated with AST node {definition_node:?}"
         );
         definition
@@ -1085,6 +1086,7 @@ impl<'db> SemanticIndexBuilder<'db> {
         self.scopes_by_node.shrink_to_fit();
         self.generator_functions.shrink_to_fit();
         self.eager_snapshots.shrink_to_fit();
+        self.globals_by_scope.shrink_to_fit();
 
         SemanticIndex {
             symbol_tables,
@@ -1093,6 +1095,7 @@ impl<'db> SemanticIndexBuilder<'db> {
             definitions_by_node: self.definitions_by_node,
             expressions_by_node: self.expressions_by_node,
             scope_ids_by_scope: self.scope_ids_by_scope,
+            globals_by_scope: self.globals_by_scope,
             ast_ids,
             scopes_by_expression: self.scopes_by_expression,
             scopes_by_node: self.scopes_by_node,
@@ -1333,7 +1336,9 @@ where
                             continue;
                         };
 
-                        let referenced_module = module.file();
+                        let Some(referenced_module) = module.file() else {
+                            continue;
+                        };
 
                         // In order to understand the visibility of definitions created by a `*` import,
                         // we need to know the visibility of the global-scope definitions in the
@@ -1475,23 +1480,37 @@ where
                 aug_assign @ ast::StmtAugAssign {
                     range: _,
                     target,
-                    op: _,
+                    op,
                     value,
                 },
             ) => {
                 debug_assert_eq!(&self.current_assignments, &[]);
                 self.visit_expr(value);
 
-                // See https://docs.python.org/3/library/ast.html#ast.AugAssign
-                if matches!(
-                    **target,
-                    ast::Expr::Attribute(_) | ast::Expr::Subscript(_) | ast::Expr::Name(_)
-                ) {
-                    self.push_assignment(aug_assign.into());
-                    self.visit_expr(target);
-                    self.pop_assignment();
-                } else {
-                    self.visit_expr(target);
+                match &**target {
+                    ast::Expr::Name(ast::ExprName { id, .. })
+                        if id == "__all__" && op.is_add() && self.in_module_scope() =>
+                    {
+                        if let ast::Expr::Attribute(ast::ExprAttribute { value, attr, .. }) =
+                            &**value
+                        {
+                            if attr == "__all__" {
+                                self.add_standalone_expression(value);
+                            }
+                        }
+
+                        self.push_assignment(aug_assign.into());
+                        self.visit_expr(target);
+                        self.pop_assignment();
+                    }
+                    ast::Expr::Name(_) | ast::Expr::Attribute(_) | ast::Expr::Subscript(_) => {
+                        self.push_assignment(aug_assign.into());
+                        self.visit_expr(target);
+                        self.pop_assignment();
+                    }
+                    _ => {
+                        self.visit_expr(target);
+                    }
                 }
             }
             ast::Stmt::If(node) => {
@@ -1806,7 +1825,7 @@ where
                     // Save the state immediately *after* visiting the `try` block
                     // but *before* we prepare for visiting the `except` block(s).
                     //
-                    // We will revert to this state prior to visiting the the `else` block,
+                    // We will revert to this state prior to visiting the `else` block,
                     // as there necessarily must have been 0 `except` blocks executed
                     // if we hit the `else` block.
                     let post_try_block_state = self.flow_snapshot();
@@ -1898,7 +1917,44 @@ where
                 // Everything in the current block after a terminal statement is unreachable.
                 self.mark_unreachable();
             }
-
+            ast::Stmt::Global(ast::StmtGlobal { range: _, names }) => {
+                for name in names {
+                    let symbol_id = self.add_symbol(name.id.clone());
+                    let symbol_table = self.current_symbol_table();
+                    let symbol = symbol_table.symbol(symbol_id);
+                    if symbol.is_bound() || symbol.is_declared() || symbol.is_used() {
+                        self.report_semantic_error(SemanticSyntaxError {
+                            kind: SemanticSyntaxErrorKind::LoadBeforeGlobalDeclaration {
+                                name: name.to_string(),
+                                start: name.range.start(),
+                            },
+                            range: name.range,
+                            python_version: self.python_version,
+                        });
+                    }
+                    let scope_id = self.current_scope();
+                    self.globals_by_scope
+                        .entry(scope_id)
+                        .or_default()
+                        .insert(symbol_id);
+                }
+                walk_stmt(self, stmt);
+            }
+            ast::Stmt::Delete(ast::StmtDelete { targets, range: _ }) => {
+                for target in targets {
+                    if let ast::Expr::Name(ast::ExprName { id, .. }) = target {
+                        let symbol_id = self.add_symbol(id.clone());
+                        self.current_symbol_table().mark_symbol_used(symbol_id);
+                    }
+                }
+                walk_stmt(self, stmt);
+            }
+            ast::Stmt::Expr(ast::StmtExpr { value, range: _ }) if self.in_module_scope() => {
+                if let Some(expr) = dunder_all_extend_argument(value) {
+                    self.add_standalone_expression(expr);
+                }
+                self.visit_expr(value);
+            }
             _ => {
                 walk_stmt(self, stmt);
             }
@@ -2310,7 +2366,7 @@ where
 
                 walk_expr(self, expr);
             }
-            ast::Expr::Yield(_) => {
+            ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => {
                 let scope = self.current_scope();
                 if self.scopes[scope].kind() == ScopeKind::Function {
                     self.generator_functions.insert(scope);
@@ -2387,7 +2443,8 @@ impl SemanticSyntaxContext for SemanticIndexBuilder<'_> {
         self.source_text().as_str()
     }
 
-    // TODO(brent) handle looking up `global` bindings
+    // We handle the one syntax error that relies on this method (`LoadBeforeGlobalDeclaration`)
+    // directly in `visit_stmt`, so this just returns a placeholder value.
     fn global(&self, _name: &str) -> Option<TextRange> {
         None
     }
@@ -2424,6 +2481,18 @@ impl SemanticSyntaxContext for SemanticIndexBuilder<'_> {
         false
     }
 
+    fn in_yield_allowed_context(&self) -> bool {
+        for scope_info in self.scope_stack.iter().rev() {
+            let scope = &self.scopes[scope_info.file_scope_id];
+            match scope.kind() {
+                ScopeKind::Class | ScopeKind::Comprehension => return false,
+                ScopeKind::Function | ScopeKind::Lambda => return true,
+                ScopeKind::Module | ScopeKind::TypeAlias | ScopeKind::Annotation => {}
+            }
+        }
+        false
+    }
+
     fn in_sync_comprehension(&self) -> bool {
         for scope_info in self.scope_stack.iter().rev() {
             let scope = &self.scopes[scope_info.file_scope_id];
@@ -2433,7 +2502,10 @@ impl SemanticSyntaxContext for SemanticIndexBuilder<'_> {
                 NodeWithScopeKind::DictComprehension(node) => &node.generators,
                 _ => continue,
             };
-            if generators.iter().all(|gen| !gen.is_async) {
+            if generators
+                .iter()
+                .all(|comprehension| !comprehension.is_async)
+            {
                 return true;
             }
         }
@@ -2586,4 +2658,44 @@ impl<'a> Unpackable<'a> {
             },
         }
     }
+}
+
+/// Returns the single argument to `__all__.extend()`, if it is a call to `__all__.extend()`
+/// where it looks like the argument might be a `submodule.__all__` expression.
+/// Else, returns `None`.
+fn dunder_all_extend_argument(value: &ast::Expr) -> Option<&ast::Expr> {
+    let ast::ExprCall {
+        func,
+        arguments:
+            ast::Arguments {
+                args,
+                keywords,
+                range: _,
+            },
+        ..
+    } = value.as_call_expr()?;
+
+    let ast::ExprAttribute { value, attr, .. } = func.as_attribute_expr()?;
+
+    let ast::ExprName { id, .. } = value.as_name_expr()?;
+
+    if id != "__all__" {
+        return None;
+    }
+
+    if attr != "extend" {
+        return None;
+    }
+
+    if !keywords.is_empty() {
+        return None;
+    }
+
+    let [single_argument] = &**args else {
+        return None;
+    };
+
+    let ast::ExprAttribute { value, attr, .. } = single_argument.as_attribute_expr()?;
+
+    (attr == "__all__").then_some(value)
 }

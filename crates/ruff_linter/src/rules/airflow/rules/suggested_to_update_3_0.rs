@@ -1,11 +1,11 @@
 use crate::checkers::ast::Checker;
 use crate::importer::ImportRequest;
 use crate::rules::airflow::helpers::{
-    is_airflow_builtin_or_provider, is_guarded_by_try_except, Replacement,
+    Replacement, is_airflow_builtin_or_provider, is_guarded_by_try_except,
 };
 use ruff_diagnostics::{Diagnostic, Edit, Fix, FixAvailability, Violation};
-use ruff_macros::{derive_message_formats, ViolationMetadata};
-use ruff_python_ast::{name::QualifiedName, Arguments, Expr, ExprAttribute, ExprCall, ExprName};
+use ruff_macros::{ViolationMetadata, derive_message_formats};
+use ruff_python_ast::{Arguments, Expr, ExprAttribute, ExprCall, ExprName, name::QualifiedName};
 use ruff_python_semantic::Modules;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
@@ -53,19 +53,13 @@ impl Violation for Airflow3SuggestedUpdate {
         } = self;
         match replacement {
             Replacement::None
-            | Replacement::Name(_)
+            | Replacement::AttrName(_)
+            | Replacement::Message(_)
             | Replacement::AutoImport { module: _, name: _ }
             | Replacement::SourceModuleMoved { module: _, name: _ } => {
                 format!(
                     "`{deprecated}` is removed in Airflow 3.0; \
                     It still works in Airflow 3.0 but is expected to be removed in a future version."
-                )
-            }
-            Replacement::Message(message) => {
-                format!(
-                    "`{deprecated}` is removed in Airflow 3.0; \
-                     It still works in Airflow 3.0 but is expected to be removed in a future version.; \
-                    {message}"
                 )
             }
         }
@@ -74,14 +68,15 @@ impl Violation for Airflow3SuggestedUpdate {
     fn fix_title(&self) -> Option<String> {
         let Airflow3SuggestedUpdate { replacement, .. } = self;
         match replacement {
-            Replacement::Name(name) => Some(format!("Use `{name}` instead")),
+            Replacement::None => None,
+            Replacement::AttrName(name) => Some(format!("Use `{name}` instead")),
+            Replacement::Message(message) => Some((*message).to_string()),
             Replacement::AutoImport { module, name } => {
                 Some(format!("Use `{module}.{name}` instead"))
             }
             Replacement::SourceModuleMoved { module, name } => {
                 Some(format!("Use `{module}.{name}` instead"))
             }
-            _ => None,
         }
     }
 }
@@ -117,16 +112,19 @@ pub(crate) fn airflow_3_0_suggested_update_expr(checker: &Checker, expr: &Expr) 
 /// Check if the `deprecated` keyword argument is being used and create a diagnostic if so along
 /// with a possible `replacement`.
 fn diagnostic_for_argument(
+    checker: &Checker,
     arguments: &Arguments,
     deprecated: &str,
     replacement: Option<&'static str>,
-) -> Option<Diagnostic> {
-    let keyword = arguments.find_keyword(deprecated)?;
+) {
+    let Some(keyword) = arguments.find_keyword(deprecated) else {
+        return;
+    };
     let mut diagnostic = Diagnostic::new(
         Airflow3SuggestedUpdate {
             deprecated: deprecated.to_string(),
             replacement: match replacement {
-                Some(name) => Replacement::Name(name),
+                Some(name) => Replacement::AttrName(name),
                 None => Replacement::None,
             },
         },
@@ -143,7 +141,7 @@ fn diagnostic_for_argument(
         )));
     }
 
-    Some(diagnostic)
+    checker.report_diagnostic(diagnostic);
 }
 /// Check whether a removed Airflow argument is passed.
 ///
@@ -157,15 +155,11 @@ fn diagnostic_for_argument(
 fn check_call_arguments(checker: &Checker, qualified_name: &QualifiedName, arguments: &Arguments) {
     match qualified_name.segments() {
         ["airflow", .., "DAG" | "dag"] => {
-            checker.report_diagnostics(diagnostic_for_argument(
-                arguments,
-                "sla_miss_callback",
-                None,
-            ));
+            diagnostic_for_argument(checker, arguments, "sla_miss_callback", None);
         }
         segments => {
             if is_airflow_builtin_or_provider(segments, "operators", "Operator") {
-                checker.report_diagnostics(diagnostic_for_argument(arguments, "sla", None));
+                diagnostic_for_argument(checker, arguments, "sla", None);
             }
         }
     }
@@ -225,12 +219,14 @@ fn check_name(checker: &Checker, expr: &Expr, range: TextRange) {
         },
 
         // airflow.decorators
-        ["airflow", "decorators", rest @ ("dag" | "task" | "task_group" | "setup" | "teardown")] => {
-            Replacement::SourceModuleMoved {
-                module: "airflow.sdk",
-                name: (*rest).to_string(),
-            }
-        }
+        [
+            "airflow",
+            "decorators",
+            rest @ ("dag" | "task" | "task_group" | "setup" | "teardown"),
+        ] => Replacement::SourceModuleMoved {
+            module: "airflow.sdk",
+            name: (*rest).to_string(),
+        },
 
         // airflow.io
         ["airflow", "io", "path", "ObjectStoragePath"] => Replacement::SourceModuleMoved {
@@ -242,17 +238,27 @@ fn check_name(checker: &Checker, expr: &Expr, range: TextRange) {
             name: "attach".to_string(),
         },
 
-        // airflow.models.baseoperator
-        ["airflow", "models", "baseoperator", rest] => match *rest {
-            "chain" | "chain_linear" | "cross_downstream" => Replacement::SourceModuleMoved {
+        // airflow.models
+        ["airflow", "models", rest @ ("Connection" | "Variable")] => {
+            Replacement::SourceModuleMoved {
                 module: "airflow.sdk",
                 name: (*rest).to_string(),
-            },
-            "BaseOperatorLink" => Replacement::AutoImport {
-                module: "airflow.sdk.definitions.baseoperatorlink",
-                name: "BaseOperatorLink",
-            },
-            _ => return,
+            }
+        }
+
+        // airflow.models.baseoperator
+        [
+            "airflow",
+            "models",
+            "baseoperator",
+            rest @ ("chain" | "chain_linear" | "cross_downstream"),
+        ] => Replacement::SourceModuleMoved {
+            module: "airflow.sdk",
+            name: (*rest).to_string(),
+        },
+        ["airflow", "models", "baseoperatorlink", "BaseOperatorLink"] => Replacement::AutoImport {
+            module: "airflow.sdk.definitions.baseoperatorlink",
+            name: "BaseOperatorLink",
         },
         // airflow.model..DAG
         ["airflow", "models", .., "DAG"] => Replacement::SourceModuleMoved {
@@ -265,19 +271,18 @@ fn check_name(checker: &Checker, expr: &Expr, range: TextRange) {
             name: "AssetOrTimeSchedule",
         },
         // airflow.utils
-        ["airflow", "utils", "dag_parsing_context", "get_parsing_context"] => {
-            Replacement::AutoImport {
-                module: "airflow.sdk",
-                name: "get_parsing_context",
-            }
-        }
+        [
+            "airflow",
+            "utils",
+            "dag_parsing_context",
+            "get_parsing_context",
+        ] => Replacement::AutoImport {
+            module: "airflow.sdk",
+            name: "get_parsing_context",
+        },
 
         _ => return,
     };
-
-    if is_guarded_by_try_except(expr, &replacement, semantic) {
-        return;
-    }
 
     let mut diagnostic = Diagnostic::new(
         Airflow3SuggestedUpdate {
@@ -287,7 +292,15 @@ fn check_name(checker: &Checker, expr: &Expr, range: TextRange) {
         range,
     );
 
-    if let Replacement::AutoImport { module, name } = replacement {
+    let semantic = checker.semantic();
+    if let Some((module, name)) = match &replacement {
+        Replacement::AutoImport { module, name } => Some((module, *name)),
+        Replacement::SourceModuleMoved { module, name } => Some((module, name.as_str())),
+        _ => None,
+    } {
+        if is_guarded_by_try_except(expr, module, name, semantic) {
+            return;
+        }
         diagnostic.try_set_fix(|| {
             let (import_edit, binding) = checker.importer().get_or_import_symbol(
                 &ImportRequest::import_from(module, name),
