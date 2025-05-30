@@ -7,13 +7,14 @@ use ruff_index::{IndexSlice, IndexVec};
 
 use ruff_python_parser::semantic_errors::SemanticSyntaxError;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
-use salsa::plumbing::AsId;
 use salsa::Update;
+use salsa::plumbing::AsId;
 
+use crate::Db;
 use crate::module_name::ModuleName;
 use crate::node_key::NodeKey;
-use crate::semantic_index::ast_ids::node_key::ExpressionNodeKey;
 use crate::semantic_index::ast_ids::AstIds;
+use crate::semantic_index::ast_ids::node_key::ExpressionNodeKey;
 use crate::semantic_index::builder::SemanticIndexBuilder;
 use crate::semantic_index::definition::{Definition, DefinitionNodeKey, Definitions};
 use crate::semantic_index::expression::Expression;
@@ -23,7 +24,6 @@ use crate::semantic_index::symbol::{
     SymbolTable,
 };
 use crate::semantic_index::use_def::{EagerSnapshotKey, ScopedEagerSnapshotId, UseDefMap};
-use crate::Db;
 
 pub mod ast_ids;
 mod builder;
@@ -46,7 +46,7 @@ type SymbolMap = hashbrown::HashMap<ScopedSymbolId, (), FxBuildHasher>;
 /// Returns the semantic index for `file`.
 ///
 /// Prefer using [`symbol_table`] when working with symbols from a single scope.
-#[salsa::tracked(return_ref, no_eq)]
+#[salsa::tracked(returns(ref), no_eq)]
 pub(crate) fn semantic_index(db: &dyn Db, file: File) -> SemanticIndex<'_> {
     let _span = tracing::trace_span!("semantic_index", ?file).entered();
 
@@ -60,7 +60,7 @@ pub(crate) fn semantic_index(db: &dyn Db, file: File) -> SemanticIndex<'_> {
 /// Using [`symbol_table`] over [`semantic_index`] has the advantage that
 /// Salsa can avoid invalidating dependent queries if this scope's symbol table
 /// is unchanged.
-#[salsa::tracked]
+#[salsa::tracked(returns(deref))]
 pub(crate) fn symbol_table<'db>(db: &'db dyn Db, scope: ScopeId<'db>) -> Arc<SymbolTable> {
     let file = scope.file(db);
     let _span = tracing::trace_span!("symbol_table", scope=?scope.as_id(), ?file).entered();
@@ -80,7 +80,7 @@ pub(crate) fn symbol_table<'db>(db: &'db dyn Db, scope: ScopeId<'db>) -> Arc<Sym
 ///
 ///   - We cannot resolve relative imports (which aren't allowed in `import` statements) without
 ///     knowing the name of the current module, and whether it's a package.
-#[salsa::tracked]
+#[salsa::tracked(returns(deref))]
 pub(crate) fn imported_modules<'db>(db: &'db dyn Db, file: File) -> Arc<FxHashSet<ModuleName>> {
     semantic_index(db, file).imported_modules.clone()
 }
@@ -90,7 +90,7 @@ pub(crate) fn imported_modules<'db>(db: &'db dyn Db, file: File) -> Arc<FxHashSe
 /// Using [`use_def_map`] over [`semantic_index`] has the advantage that
 /// Salsa can avoid invalidating dependent queries if this scope's use-def map
 /// is unchanged.
-#[salsa::tracked]
+#[salsa::tracked(returns(deref))]
 pub(crate) fn use_def_map<'db>(db: &'db dyn Db, scope: ScopeId<'db>) -> Arc<UseDefMap<'db>> {
     let file = scope.file(db);
     let _span = tracing::trace_span!("use_def_map", scope=?scope.as_id(), ?file).entered();
@@ -99,7 +99,9 @@ pub(crate) fn use_def_map<'db>(db: &'db dyn Db, scope: ScopeId<'db>) -> Arc<UseD
     index.use_def_map(scope.file_scope_id(db))
 }
 
-/// Returns all attribute assignments (and their method scope IDs) for a specific class body scope.
+/// Returns all attribute assignments (and their method scope IDs) with a symbol name matching
+/// the one given for a specific class body scope.
+///
 /// Only call this when doing type inference on the same file as `class_body_scope`, otherwise it
 /// introduces a direct dependency on that file's AST.
 pub(crate) fn attribute_assignments<'db, 's>(
@@ -107,6 +109,28 @@ pub(crate) fn attribute_assignments<'db, 's>(
     class_body_scope: ScopeId<'db>,
     name: &'s str,
 ) -> impl Iterator<Item = (BindingWithConstraintsIterator<'db, 'db>, FileScopeId)> + use<'s, 'db> {
+    let file = class_body_scope.file(db);
+    let index = semantic_index(db, file);
+
+    attribute_scopes(db, class_body_scope).filter_map(|function_scope_id| {
+        let attribute_table = index.instance_attribute_table(function_scope_id);
+        let symbol = attribute_table.symbol_id_by_name(name)?;
+        let use_def = &index.use_def_maps[function_scope_id];
+        Some((
+            use_def.instance_attribute_bindings(symbol),
+            function_scope_id,
+        ))
+    })
+}
+
+/// Returns all attribute assignments as scope IDs for a specific class body scope.
+///
+/// Only call this when doing type inference on the same file as `class_body_scope`, otherwise it
+/// introduces a direct dependency on that file's AST.
+pub(crate) fn attribute_scopes<'db, 's>(
+    db: &'db dyn Db,
+    class_body_scope: ScopeId<'db>,
+) -> impl Iterator<Item = FileScopeId> + use<'s, 'db> {
     let file = class_body_scope.file(db);
     let index = semantic_index(db, file);
     let class_scope_id = class_body_scope.file_scope_id(db);
@@ -124,13 +148,7 @@ pub(crate) fn attribute_assignments<'db, 's>(
             };
 
         function_scope.node().as_function()?;
-        let attribute_table = index.instance_attribute_table(function_scope_id);
-        let symbol = attribute_table.symbol_id_by_name(name)?;
-        let use_def = &index.use_def_maps[function_scope_id];
-        Some((
-            use_def.instance_attribute_bindings(symbol),
-            function_scope_id,
-        ))
+        Some(function_scope_id)
     })
 }
 
@@ -175,6 +193,9 @@ pub(crate) struct SemanticIndex<'db> {
 
     /// Map from the file-local [`FileScopeId`] to the salsa-ingredient [`ScopeId`].
     scope_ids_by_scope: IndexVec<FileScopeId, ScopeId<'db>>,
+
+    /// Map from the file-local [`FileScopeId`] to the set of explicit-global symbols it contains.
+    globals_by_scope: FxHashMap<FileScopeId, FxHashSet<ScopedSymbolId>>,
 
     /// Use-def map for each scope in this file.
     use_def_maps: IndexVec<FileScopeId, Arc<UseDefMap<'db>>>,
@@ -253,6 +274,16 @@ impl<'db> SemanticIndex<'db> {
 
     pub(crate) fn scope_ids(&self) -> impl Iterator<Item = ScopeId> {
         self.scope_ids_by_scope.iter().copied()
+    }
+
+    pub(crate) fn symbol_is_global_in_scope(
+        &self,
+        symbol: ScopedSymbolId,
+        scope: FileScopeId,
+    ) -> bool {
+        self.globals_by_scope
+            .get(&scope)
+            .is_some_and(|globals| globals.contains(&symbol))
     }
 
     /// Returns the id of the parent scope.
@@ -372,6 +403,14 @@ impl<'db> SemanticIndex<'db> {
         self.expressions_by_node
             .get(&expression_key.into())
             .copied()
+    }
+
+    pub(crate) fn is_standalone_expression(
+        &self,
+        expression_key: impl Into<ExpressionNodeKey>,
+    ) -> bool {
+        self.expressions_by_node
+            .contains_key(&expression_key.into())
     }
 
     /// Returns the id of the scope that `node` creates.
@@ -498,7 +537,7 @@ pub struct ChildrenIter<'a> {
 }
 
 impl<'a> ChildrenIter<'a> {
-    fn new(module_symbol_table: &'a SemanticIndex, parent: FileScopeId) -> Self {
+    pub(crate) fn new(module_symbol_table: &'a SemanticIndex, parent: FileScopeId) -> Self {
         let descendants = DescendantsIter::new(module_symbol_table, parent);
 
         Self {
@@ -521,11 +560,12 @@ impl FusedIterator for ChildrenIter<'_> {}
 
 #[cfg(test)]
 mod tests {
-    use ruff_db::files::{system_path_to_file, File};
+    use ruff_db::files::{File, system_path_to_file};
     use ruff_db::parsed::parsed_module;
     use ruff_python_ast::{self as ast};
     use ruff_text_size::{Ranged, TextRange};
 
+    use crate::Db;
     use crate::db::tests::{TestDb, TestDbBuilder};
     use crate::semantic_index::ast_ids::{HasScopedUseId, ScopedUseId};
     use crate::semantic_index::definition::{Definition, DefinitionKind};
@@ -534,7 +574,6 @@ mod tests {
     };
     use crate::semantic_index::use_def::UseDefMap;
     use crate::semantic_index::{global_scope, semantic_index, symbol_table, use_def_map};
-    use crate::Db;
 
     impl UseDefMap<'_> {
         fn first_public_binding(&self, symbol: ScopedSymbolId) -> Option<Definition<'_>> {
@@ -578,7 +617,7 @@ mod tests {
         let TestCase { db, file } = test_case("");
         let global_table = symbol_table(&db, global_scope(&db, file));
 
-        let global_names = names(&global_table);
+        let global_names = names(global_table);
 
         assert_eq!(global_names, Vec::<&str>::new());
     }
@@ -588,7 +627,7 @@ mod tests {
         let TestCase { db, file } = test_case("x");
         let global_table = symbol_table(&db, global_scope(&db, file));
 
-        assert_eq!(names(&global_table), vec!["x"]);
+        assert_eq!(names(global_table), vec!["x"]);
     }
 
     #[test]
@@ -596,7 +635,7 @@ mod tests {
         let TestCase { db, file } = test_case("x: int");
         let global_table = symbol_table(&db, global_scope(&db, file));
 
-        assert_eq!(names(&global_table), vec!["int", "x"]);
+        assert_eq!(names(global_table), vec!["int", "x"]);
         // TODO record definition
     }
 
@@ -606,7 +645,7 @@ mod tests {
         let scope = global_scope(&db, file);
         let global_table = symbol_table(&db, scope);
 
-        assert_eq!(names(&global_table), vec!["foo"]);
+        assert_eq!(names(global_table), vec!["foo"]);
         let foo = global_table.symbol_id_by_name("foo").unwrap();
 
         let use_def = use_def_map(&db, scope);
@@ -619,7 +658,7 @@ mod tests {
         let TestCase { db, file } = test_case("import foo.bar");
         let global_table = symbol_table(&db, global_scope(&db, file));
 
-        assert_eq!(names(&global_table), vec!["foo"]);
+        assert_eq!(names(global_table), vec!["foo"]);
     }
 
     #[test]
@@ -627,7 +666,7 @@ mod tests {
         let TestCase { db, file } = test_case("import foo.bar as baz");
         let global_table = symbol_table(&db, global_scope(&db, file));
 
-        assert_eq!(names(&global_table), vec!["baz"]);
+        assert_eq!(names(global_table), vec!["baz"]);
     }
 
     #[test]
@@ -636,7 +675,7 @@ mod tests {
         let scope = global_scope(&db, file);
         let global_table = symbol_table(&db, scope);
 
-        assert_eq!(names(&global_table), vec!["foo"]);
+        assert_eq!(names(global_table), vec!["foo"]);
         assert!(
             global_table
                 .symbol_by_name("foo")
@@ -661,7 +700,7 @@ mod tests {
         let scope = global_scope(&db, file);
         let global_table = symbol_table(&db, scope);
 
-        assert_eq!(names(&global_table), vec!["foo", "x"]);
+        assert_eq!(names(global_table), vec!["foo", "x"]);
         assert!(
             global_table
                 .symbol_by_name("foo")
@@ -681,7 +720,7 @@ mod tests {
         let scope = global_scope(&db, file);
         let global_table = symbol_table(&db, scope);
 
-        assert_eq!(names(&global_table), vec!["x"]);
+        assert_eq!(names(global_table), vec!["x"]);
 
         let use_def = use_def_map(&db, scope);
         let binding = use_def
@@ -705,7 +744,7 @@ y = 2
         );
         let global_table = symbol_table(&db, global_scope(&db, file));
 
-        assert_eq!(names(&global_table), vec!["C", "y"]);
+        assert_eq!(names(global_table), vec!["C", "y"]);
 
         let index = semantic_index(&db, file);
 
@@ -777,7 +816,7 @@ def f(a: str, /, b: str, c: int = 1, *args, d: int = 2, **kwargs):
         let index = semantic_index(&db, file);
         let global_table = symbol_table(&db, global_scope(&db, file));
 
-        assert_eq!(names(&global_table), vec!["str", "int", "f"]);
+        assert_eq!(names(global_table), vec!["str", "int", "f"]);
 
         let [(function_scope_id, _function_scope)] = index
             .child_scopes(FileScopeId::global())
@@ -834,7 +873,7 @@ def f(a: str, /, b: str, c: int = 1, *args, d: int = 2, **kwargs):
         let index = semantic_index(&db, file);
         let global_table = symbol_table(&db, global_scope(&db, file));
 
-        assert!(names(&global_table).is_empty());
+        assert!(names(global_table).is_empty());
 
         let [(lambda_scope_id, _lambda_scope)] = index
             .child_scopes(FileScopeId::global())
@@ -1085,7 +1124,10 @@ def func():
         let global_table = index.symbol_table(FileScopeId::global());
 
         assert_eq!(names(&global_table), vec!["func"]);
-        let [(func_scope1_id, func_scope_1), (func_scope2_id, func_scope_2)] = index
+        let [
+            (func_scope1_id, func_scope_1),
+            (func_scope2_id, func_scope_2),
+        ] = index
             .child_scopes(FileScopeId::global())
             .collect::<Vec<_>>()[..]
         else {
@@ -1323,8 +1365,10 @@ match subject:
 
         assert!(global_table.symbol_by_name("Foo").unwrap().is_used());
         assert_eq!(
-            names(&global_table),
-            vec!["subject", "a", "b", "c", "d", "e", "f", "g", "h", "Foo", "i", "j", "k", "l"]
+            names(global_table),
+            vec![
+                "subject", "a", "b", "c", "d", "e", "f", "g", "h", "Foo", "i", "j", "k", "l"
+            ]
         );
 
         let use_def = use_def_map(&db, global_scope_id);
@@ -1368,7 +1412,7 @@ match 1:
         let global_scope_id = global_scope(&db, file);
         let global_table = symbol_table(&db, global_scope_id);
 
-        assert_eq!(names(&global_table), vec!["first", "second"]);
+        assert_eq!(names(global_table), vec!["first", "second"]);
 
         let use_def = use_def_map(&db, global_scope_id);
         for (name, expected_index) in [("first", 0), ("second", 0)] {
@@ -1389,7 +1433,7 @@ match 1:
         let scope = global_scope(&db, file);
         let global_table = symbol_table(&db, scope);
 
-        assert_eq!(&names(&global_table), &["a", "x"]);
+        assert_eq!(&names(global_table), &["a", "x"]);
 
         let use_def = use_def_map(&db, scope);
         let binding = use_def
@@ -1405,7 +1449,7 @@ match 1:
         let scope = global_scope(&db, file);
         let global_table = symbol_table(&db, scope);
 
-        assert_eq!(&names(&global_table), &["a", "x", "y"]);
+        assert_eq!(&names(global_table), &["a", "x", "y"]);
 
         let use_def = use_def_map(&db, scope);
         let x_binding = use_def
@@ -1425,7 +1469,7 @@ match 1:
         let scope = global_scope(&db, file);
         let global_table = symbol_table(&db, scope);
 
-        assert_eq!(&names(&global_table), &["e", "a", "b", "c", "d"]);
+        assert_eq!(&names(global_table), &["e", "a", "b", "c", "d"]);
 
         let use_def = use_def_map(&db, scope);
         let binding = use_def

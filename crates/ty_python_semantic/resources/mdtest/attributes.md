@@ -54,11 +54,11 @@ c_instance.declared_and_bound = False
 c_instance.declared_and_bound = "incompatible"
 
 # mypy shows no error here, but pyright raises "reportAttributeAccessIssue"
-# error: [unresolved-attribute] "Attribute `inferred_from_value` can only be accessed on instances, not on the class object `Literal[C]` itself."
+# error: [unresolved-attribute] "Attribute `inferred_from_value` can only be accessed on instances, not on the class object `<class 'C'>` itself."
 reveal_type(C.inferred_from_value)  # revealed: Unknown
 
 # mypy shows no error here, but pyright raises "reportAttributeAccessIssue"
-# error: [invalid-attribute-access] "Cannot assign to instance attribute `inferred_from_value` from the class object `Literal[C]`"
+# error: [invalid-attribute-access] "Cannot assign to instance attribute `inferred_from_value` from the class object `<class 'C'>`"
 C.inferred_from_value = "overwritten on class"
 
 # This assignment is fine:
@@ -90,11 +90,11 @@ reveal_type(c_instance.declared_and_bound)  # revealed: str | None
 
 # Note that both mypy and pyright show no error in this case! So we may reconsider this in
 # the future, if it turns out to produce too many false positives. We currently emit:
-# error: [unresolved-attribute] "Attribute `declared_and_bound` can only be accessed on instances, not on the class object `Literal[C]` itself."
+# error: [unresolved-attribute] "Attribute `declared_and_bound` can only be accessed on instances, not on the class object `<class 'C'>` itself."
 reveal_type(C.declared_and_bound)  # revealed: Unknown
 
 # Same as above. Mypy and pyright do not show an error here.
-# error: [invalid-attribute-access] "Cannot assign to instance attribute `declared_and_bound` from the class object `Literal[C]`"
+# error: [invalid-attribute-access] "Cannot assign to instance attribute `declared_and_bound` from the class object `<class 'C'>`"
 C.declared_and_bound = "overwritten on class"
 
 # error: [invalid-assignment] "Object of type `Literal[1]` is not assignable to attribute `declared_and_bound` of type `str | None`"
@@ -115,10 +115,10 @@ c_instance = C()
 reveal_type(c_instance.only_declared)  # revealed: str
 
 # Mypy and pyright do not show an error here. We treat this as a pure instance variable.
-# error: [unresolved-attribute] "Attribute `only_declared` can only be accessed on instances, not on the class object `Literal[C]` itself."
+# error: [unresolved-attribute] "Attribute `only_declared` can only be accessed on instances, not on the class object `<class 'C'>` itself."
 reveal_type(C.only_declared)  # revealed: Unknown
 
-# error: [invalid-attribute-access] "Cannot assign to instance attribute `only_declared` from the class object `Literal[C]`"
+# error: [invalid-attribute-access] "Cannot assign to instance attribute `only_declared` from the class object `<class 'C'>`"
 C.only_declared = "overwritten on class"
 ```
 
@@ -191,10 +191,10 @@ reveal_type(c_instance.declared_only)  # revealed: bytes
 
 reveal_type(c_instance.declared_and_bound)  # revealed: bool
 
-# error: [unresolved-attribute] "Attribute `inferred_from_value` can only be accessed on instances, not on the class object `Literal[C]` itself."
+# error: [unresolved-attribute] "Attribute `inferred_from_value` can only be accessed on instances, not on the class object `<class 'C'>` itself."
 reveal_type(C.inferred_from_value)  # revealed: Unknown
 
-# error: [invalid-attribute-access] "Cannot assign to instance attribute `inferred_from_value` from the class object `Literal[C]`"
+# error: [invalid-attribute-access] "Cannot assign to instance attribute `inferred_from_value` from the class object `<class 'C'>`"
 C.inferred_from_value = "overwritten on class"
 ```
 
@@ -718,7 +718,7 @@ reveal_type(C.pure_class_variable)  # revealed: Unknown
 
 # TODO: should be no error when descriptor protocol is supported
 # and the assignment is properly attributed to the class method.
-# error: [invalid-attribute-access] "Cannot assign to instance attribute `pure_class_variable` from the class object `Literal[C]`"
+# error: [invalid-attribute-access] "Cannot assign to instance attribute `pure_class_variable` from the class object `<class 'C'>`"
 C.pure_class_variable = "overwritten on class"
 
 # TODO: should be  `Unknown | Literal["value set in class method"]` or
@@ -775,6 +775,30 @@ reveal_type(C.variable_with_class_default1)  # revealed: str
 
 # TODO: should still be `Literal["value set on instance"]`, or `str`.
 reveal_type(c_instance.variable_with_class_default1)  # revealed: str
+```
+
+#### Descriptor attributes as class variables
+
+Whether they are explicitly qualified as `ClassVar`, or just have a class level default, we treat
+descriptor attributes as class variables. This test mainly makes sure that we do *not* treat them as
+instance variables. This would lead to a different outcome, since the `__get__` method would not be
+called (the descriptor protocol is not invoked for instance variables).
+
+```py
+from typing import ClassVar
+
+class Descriptor:
+    def __get__(self, instance, owner) -> int:
+        return 42
+
+class C:
+    a: ClassVar[Descriptor]
+    b: Descriptor = Descriptor()
+    c: ClassVar[Descriptor] = Descriptor()
+
+reveal_type(C().a)  # revealed: int
+reveal_type(C().b)  # revealed: int
+reveal_type(C().c)  # revealed: int
 ```
 
 ### Inheritance of class/instance attributes
@@ -925,7 +949,7 @@ def _(flag: bool):
     reveal_type(C1.y)  # revealed: int | str
 
     C1.y = 100
-    # error: [invalid-assignment] "Object of type `Literal["problematic"]` is not assignable to attribute `y` on type `Literal[C1, C1]`"
+    # error: [invalid-assignment] "Object of type `Literal["problematic"]` is not assignable to attribute `y` on type `<class 'C1'> | <class 'C1'>`"
     C1.y = "problematic"
 
     class C2:
@@ -1002,10 +1026,10 @@ def _(flag1: bool, flag2: bool):
 
     C = C1 if flag1 else C2 if flag2 else C3
 
-    # error: [possibly-unbound-attribute] "Attribute `x` on type `Literal[C1, C2, C3]` is possibly unbound"
+    # error: [possibly-unbound-attribute] "Attribute `x` on type `<class 'C1'> | <class 'C2'> | <class 'C3'>` is possibly unbound"
     reveal_type(C.x)  # revealed: Unknown | Literal[1, 3]
 
-    # error: [invalid-assignment] "Object of type `Literal[100]` is not assignable to attribute `x` on type `Literal[C1, C2, C3]`"
+    # error: [invalid-assignment] "Object of type `Literal[100]` is not assignable to attribute `x` on type `<class 'C1'> | <class 'C2'> | <class 'C3'>`"
     C.x = 100
 
     # error: [possibly-unbound-attribute] "Attribute `x` on type `C1 | C2 | C3` is possibly unbound"
@@ -1034,7 +1058,7 @@ def _(flag: bool, flag1: bool, flag2: bool):
 
     C = C1 if flag1 else C2 if flag2 else C3
 
-    # error: [possibly-unbound-attribute] "Attribute `x` on type `Literal[C1, C2, C3]` is possibly unbound"
+    # error: [possibly-unbound-attribute] "Attribute `x` on type `<class 'C1'> | <class 'C2'> | <class 'C3'>` is possibly unbound"
     reveal_type(C.x)  # revealed: Unknown | Literal[1, 2, 3]
 
     # error: [possibly-unbound-attribute]
@@ -1165,12 +1189,12 @@ def _(flag: bool):
     class C2: ...
     C = C1 if flag else C2
 
-    # error: [unresolved-attribute] "Type `Literal[C1, C2]` has no attribute `x`"
+    # error: [unresolved-attribute] "Type `<class 'C1'> | <class 'C2'>` has no attribute `x`"
     reveal_type(C.x)  # revealed: Unknown
 
     # TODO: This should ideally be a `unresolved-attribute` error. We need better union
     # handling in `validate_attribute_assignment` for this.
-    # error: [invalid-assignment] "Object of type `Literal[1]` is not assignable to attribute `x` on type `Literal[C1, C2]`"
+    # error: [invalid-assignment] "Object of type `Literal[1]` is not assignable to attribute `x` on type `<class 'C1'> | <class 'C2'>`"
     C.x = 1
 ```
 
@@ -1206,7 +1230,7 @@ class C(D, F): ...
 class B(E, D): ...
 class A(B, C): ...
 
-# revealed: tuple[Literal[A], Literal[B], Literal[E], Literal[C], Literal[D], Literal[F], Literal[O], Literal[object]]
+# revealed: tuple[<class 'A'>, <class 'B'>, <class 'E'>, <class 'C'>, <class 'D'>, <class 'F'>, <class 'O'>, <class 'object'>]
 reveal_type(A.__mro__)
 
 # `E` is earlier in the MRO than `F`, so we should use the type of `E.X`
@@ -1399,7 +1423,7 @@ class A:
 class B(Any): ...
 class C(B, A): ...
 
-reveal_type(C.__mro__)  # revealed: tuple[Literal[C], Literal[B], Any, Literal[A], Literal[object]]
+reveal_type(C.__mro__)  # revealed: tuple[<class 'C'>, <class 'B'>, Any, <class 'A'>, <class 'object'>]
 reveal_type(C.x)  # revealed: Literal[1] & Any
 ```
 
@@ -1462,6 +1486,14 @@ Instance attributes also take precedence over the `__getattr__` method:
 reveal_type(c.instance_attr)  # revealed: str
 ```
 
+Importantly, `__getattr__` is only called if attributes are accessed on instances, not if they are
+accessed on the class itself:
+
+```py
+# error: [unresolved-attribute]
+CustomGetAttr.whatever
+```
+
 ### Type of the `name` parameter
 
 If the `name` parameter of the `__getattr__` method is annotated with a (union of) literal type(s),
@@ -1493,6 +1525,65 @@ import argparse
 
 def _(ns: argparse.Namespace):
     reveal_type(ns.whatever)  # revealed: Any
+```
+
+## Classes with custom `__getattribute__` methods
+
+If a type provides a custom `__getattribute__`, we use its return type as the type for unknown
+attributes. Note that this behavior differs from runtime, where `__getattribute__` is called
+unconditionally, even for known attributes. The rationale for doing this is that it allows users to
+specify more precise types for specific attributes, such as `x: str` in the example below. This
+behavior matches other type checkers such as mypy and pyright.
+
+```py
+from typing import Any
+
+class Foo:
+    x: str
+    def __getattribute__(self, attr: str) -> Any:
+        return 42
+
+reveal_type(Foo().x)  # revealed: str
+reveal_type(Foo().y)  # revealed: Any
+```
+
+A standard library example for a class with a custom `__getattribute__` method is `SimpleNamespace`:
+
+```py
+from types import SimpleNamespace
+
+sn = SimpleNamespace(a="a")
+
+reveal_type(sn.a)  # revealed: Any
+```
+
+`__getattribute__` takes precedence over `__getattr__`:
+
+```py
+class C:
+    def __getattribute__(self, name: str) -> int:
+        return 1
+
+    def __getattr__(self, name: str) -> str:
+        return "a"
+
+c = C()
+
+reveal_type(c.x)  # revealed: int
+```
+
+Like all dunder methods, `__getattribute__` is not looked up on instances:
+
+```py
+def external_getattribute(name) -> int:
+    return 1
+
+class ThisFails:
+    def __init__(self):
+        self.__getattribute__ = external_getattribute
+
+# error: [unresolved-attribute]
+ThisFails().x
 ```
 
 ## Classes with custom `__setattr__` methods
@@ -1556,31 +1647,31 @@ The type of `x.__class__` is the same as `x`'s meta-type. `x.__class__` is alway
 ```py
 import typing_extensions
 
-reveal_type(typing_extensions.__class__)  # revealed: Literal[ModuleType]
-reveal_type(type(typing_extensions))  # revealed: Literal[ModuleType]
+reveal_type(typing_extensions.__class__)  # revealed: <class 'ModuleType'>
+reveal_type(type(typing_extensions))  # revealed: <class 'ModuleType'>
 
 a = 42
-reveal_type(a.__class__)  # revealed: Literal[int]
-reveal_type(type(a))  # revealed: Literal[int]
+reveal_type(a.__class__)  # revealed: <class 'int'>
+reveal_type(type(a))  # revealed: <class 'int'>
 
 b = "42"
-reveal_type(b.__class__)  # revealed: Literal[str]
+reveal_type(b.__class__)  # revealed: <class 'str'>
 
 c = b"42"
-reveal_type(c.__class__)  # revealed: Literal[bytes]
+reveal_type(c.__class__)  # revealed: <class 'bytes'>
 
 d = True
-reveal_type(d.__class__)  # revealed: Literal[bool]
+reveal_type(d.__class__)  # revealed: <class 'bool'>
 
 e = (42, 42)
-reveal_type(e.__class__)  # revealed: Literal[tuple]
+reveal_type(e.__class__)  # revealed: <class 'tuple'>
 
 def f(a: int, b: typing_extensions.LiteralString, c: int | str, d: type[str]):
     reveal_type(a.__class__)  # revealed: type[int]
     reveal_type(type(a))  # revealed: type[int]
 
-    reveal_type(b.__class__)  # revealed: Literal[str]
-    reveal_type(type(b))  # revealed: Literal[str]
+    reveal_type(b.__class__)  # revealed: <class 'str'>
+    reveal_type(type(b))  # revealed: <class 'str'>
 
     reveal_type(c.__class__)  # revealed: type[int] | type[str]
     reveal_type(type(c))  # revealed: type[int] | type[str]
@@ -1591,11 +1682,11 @@ def f(a: int, b: typing_extensions.LiteralString, c: int | str, d: type[str]):
     # All we know is that the metaclass must be a (non-strict) subclass of `type`.
     reveal_type(d.__class__)  # revealed: type[type]
 
-reveal_type(f.__class__)  # revealed: Literal[FunctionType]
+reveal_type(f.__class__)  # revealed: <class 'FunctionType'>
 
 class Foo: ...
 
-reveal_type(Foo.__class__)  # revealed: Literal[type]
+reveal_type(Foo.__class__)  # revealed: <class 'type'>
 ```
 
 ## Module attributes
@@ -1666,6 +1757,36 @@ reveal_type(outer.nested.inner.Outer.Nested.Inner.attr)  # revealed: int
 outer.nested.inner.Outer.Nested.Inner.attr = "a"
 ```
 
+### Unions of module attributes
+
+`mod1.py`:
+
+```py
+global_symbol: str = "a"
+```
+
+`mod2.py`:
+
+```py
+global_symbol: str = "a"
+```
+
+```py
+import mod1
+import mod2
+
+def _(flag: bool):
+    if flag:
+        mod = mod1
+    else:
+        mod = mod2
+
+    mod.global_symbol = "b"
+
+    # error: [invalid-assignment] "Object of type `Literal[1]` is not assignable to attribute `global_symbol` on type `<module 'mod1'> | <module 'mod2'>`"
+    mod.global_symbol = 1
+```
+
 ## Literal types
 
 ### Function-literal attributes
@@ -1676,7 +1797,7 @@ functions are instances of that class:
 ```py
 def f(): ...
 
-reveal_type(f.__defaults__)  # revealed: @Todo(full tuple[...] support) | None
+reveal_type(f.__defaults__)  # revealed: tuple[Any, ...] | None
 reveal_type(f.__kwdefaults__)  # revealed: dict[str, Any] | None
 ```
 
@@ -1728,9 +1849,9 @@ reveal_type(False.real)  # revealed: Literal[0]
 All attribute access on literal `bytes` types is currently delegated to `builtins.bytes`:
 
 ```py
-# revealed: bound method Literal[b"foo"].join(iterable_of_bytes: @Todo(specialized non-generic class), /) -> bytes
+# revealed: bound method Literal[b"foo"].join(iterable_of_bytes: Iterable[@Todo(Support for `typing.TypeAlias`)], /) -> bytes
 reveal_type(b"foo".join)
-# revealed: bound method Literal[b"foo"].endswith(suffix: @Todo(Support for `typing.TypeAlias`), start: SupportsIndex | None = ellipsis, end: SupportsIndex | None = ellipsis, /) -> bool
+# revealed: bound method Literal[b"foo"].endswith(suffix: @Todo(Support for `typing.TypeAlias`) | tuple[@Todo(Support for `typing.TypeAlias`), ...], start: SupportsIndex | None = ellipsis, end: SupportsIndex | None = ellipsis, /) -> bool
 reveal_type(b"foo".endswith)
 ```
 
@@ -1945,7 +2066,7 @@ reveal_type(C.a_complex)  # revealed: int | float | complex
 reveal_type(C.a_tuple)  # revealed: tuple[int]
 reveal_type(C.a_range)  # revealed: range
 # TODO: revealed: slice[Any, Literal[1], Any]
-reveal_type(C.a_slice)  # revealed: slice[Any, _StartT_co, _StartT_co | _StopT_co]
+reveal_type(C.a_slice)  # revealed: slice[Any, Any, Any]
 reveal_type(C.a_type)  # revealed: type
 reveal_type(C.a_none)  # revealed: None
 ```

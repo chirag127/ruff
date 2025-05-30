@@ -2,11 +2,11 @@ use ruff_db::files::File;
 use ruff_python_ast::{self as ast, AnyNodeRef};
 use ruff_text_size::{Ranged, TextRange};
 
+use crate::Db;
 use crate::ast_node_ref::AstNodeRef;
 use crate::semantic_index::ast_ids::{HasScopedExpressionId, ScopedExpressionId};
 use crate::semantic_index::expression::Expression;
 use crate::semantic_index::symbol::{FileScopeId, ScopeId};
-use crate::Db;
 
 /// This ingredient represents a single unpacking.
 ///
@@ -37,7 +37,7 @@ pub(crate) struct Unpack<'db> {
     /// The target expression that is being unpacked. For example, in `(a, b) = (1, 2)`, the target
     /// expression is `(a, b)`.
     #[no_eq]
-    #[return_ref]
+    #[returns(deref)]
     #[tracked]
     pub(crate) target: AstNodeRef<ast::Expr>,
 
@@ -102,7 +102,7 @@ impl<'db> UnpackValue<'db> {
 
     /// Returns the expression as an [`AnyNodeRef`].
     pub(crate) fn as_any_node_ref(self, db: &'db dyn Db) -> AnyNodeRef<'db> {
-        self.expression().node_ref(db).node().into()
+        self.expression().node_ref(db).into()
     }
 
     pub(crate) const fn kind(self) -> UnpackKind {
