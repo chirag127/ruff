@@ -13,8 +13,8 @@ use ruff_db::system::{
 use ruff_notebook::{Notebook, NotebookError};
 use ty_python_semantic::Db;
 
-use crate::session::index::Index;
 use crate::DocumentQuery;
+use crate::session::index::Index;
 
 /// Converts the given [`Url`] to an [`AnySystemPath`].
 ///
@@ -47,10 +47,19 @@ pub(crate) fn file_to_url(db: &dyn Db, file: File) -> Option<Url> {
 }
 
 /// Represents either a [`SystemPath`] or a [`SystemVirtualPath`].
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum AnySystemPath {
     System(SystemPathBuf),
     SystemVirtual(SystemVirtualPathBuf),
+}
+
+impl AnySystemPath {
+    pub(crate) const fn as_system(&self) -> Option<&SystemPathBuf> {
+        match self {
+            AnySystemPath::System(system_path_buf) => Some(system_path_buf),
+            AnySystemPath::SystemVirtual(_) => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -221,7 +230,7 @@ impl System for LSPSystem {
         &self,
         pattern: &str,
     ) -> std::result::Result<
-        Box<dyn Iterator<Item = std::result::Result<SystemPathBuf, GlobError>>>,
+        Box<dyn Iterator<Item = std::result::Result<SystemPathBuf, GlobError>> + '_>,
         PatternError,
     > {
         self.os_system.glob(pattern)
@@ -237,6 +246,10 @@ impl System for LSPSystem {
 
     fn case_sensitivity(&self) -> CaseSensitivity {
         self.os_system.case_sensitivity()
+    }
+
+    fn env_var(&self, name: &str) -> std::result::Result<String, std::env::VarError> {
+        self.os_system.env_var(name)
     }
 }
 

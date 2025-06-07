@@ -1,6 +1,9 @@
-use crate::symbol::SymbolAndQualifiers;
-
-use super::{ClassType, Db, DynamicType, KnownClass, MemberLookupPolicy, Type};
+use crate::place::PlaceAndQualifiers;
+use crate::types::{
+    ClassType, DynamicType, KnownClass, MemberLookupPolicy, Type, TypeMapping, TypeRelation,
+    TypeVarInstance,
+};
+use crate::{Db, FxOrderSet};
 
 /// A type that represents `type[C]`, i.e. the class object `C` and class objects that are subclasses of `C`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
@@ -28,10 +31,14 @@ impl<'db> SubclassOfType<'db> {
             SubclassOfInner::Class(class) => {
                 if class.is_final(db) {
                     Type::from(class)
-                } else if class.is_object(db) {
-                    KnownClass::Type.to_instance(db)
                 } else {
-                    Type::SubclassOf(Self { subclass_of })
+                    match class.known(db) {
+                        Some(KnownClass::Object) => KnownClass::Type.to_instance(db),
+                        Some(KnownClass::Any) => Type::SubclassOf(Self {
+                            subclass_of: SubclassOfInner::Dynamic(DynamicType::Any),
+                        }),
+                        _ => Type::SubclassOf(Self { subclass_of }),
+                    }
                 }
             }
         }
@@ -66,31 +73,65 @@ impl<'db> SubclassOfType<'db> {
         !self.is_dynamic()
     }
 
+    pub(super) fn apply_type_mapping<'a>(
+        self,
+        db: &'db dyn Db,
+        type_mapping: &TypeMapping<'a, 'db>,
+    ) -> Self {
+        match self.subclass_of {
+            SubclassOfInner::Class(class) => Self {
+                subclass_of: SubclassOfInner::Class(class.apply_type_mapping(db, type_mapping)),
+            },
+            SubclassOfInner::Dynamic(_) => self,
+        }
+    }
+
+    pub(super) fn find_legacy_typevars(
+        self,
+        db: &'db dyn Db,
+        typevars: &mut FxOrderSet<TypeVarInstance<'db>>,
+    ) {
+        match self.subclass_of {
+            SubclassOfInner::Class(class) => {
+                class.find_legacy_typevars(db, typevars);
+            }
+            SubclassOfInner::Dynamic(_) => {}
+        }
+    }
+
     pub(crate) fn find_name_in_mro_with_policy(
         self,
         db: &'db dyn Db,
         name: &str,
         policy: MemberLookupPolicy,
-    ) -> Option<SymbolAndQualifiers<'db>> {
+    ) -> Option<PlaceAndQualifiers<'db>> {
         Type::from(self.subclass_of).find_name_in_mro_with_policy(db, name, policy)
     }
 
-    /// Return `true` if `self` is a subtype of `other`.
-    ///
-    /// This can only return `true` if `self.subclass_of` is a [`SubclassOfInner::Class`] variant;
-    /// only fully static types participate in subtyping.
-    pub(crate) fn is_subtype_of(self, db: &'db dyn Db, other: SubclassOfType<'db>) -> bool {
+    /// Return `true` if `self` has a certain relation to `other`.
+    pub(crate) fn has_relation_to(
+        self,
+        db: &'db dyn Db,
+        other: SubclassOfType<'db>,
+        relation: TypeRelation,
+    ) -> bool {
         match (self.subclass_of, other.subclass_of) {
-            // Non-fully-static types do not participate in subtyping
-            (SubclassOfInner::Dynamic(_), _) | (_, SubclassOfInner::Dynamic(_)) => false,
+            (SubclassOfInner::Dynamic(_), _) | (_, SubclassOfInner::Dynamic(_)) => {
+                relation.applies_to_non_fully_static_types()
+            }
 
             // For example, `type[bool]` describes all possible runtime subclasses of the class `bool`,
             // and `type[int]` describes all possible runtime subclasses of the class `int`.
             // The first set is a subset of the second set, because `bool` is itself a subclass of `int`.
             (SubclassOfInner::Class(self_class), SubclassOfInner::Class(other_class)) => {
-                // N.B. The subclass relation is fully static
-                self_class.is_subclass_of(db, other_class)
+                self_class.has_relation_to(db, other_class, relation)
             }
+        }
+    }
+
+    pub(crate) fn normalized(self, db: &'db dyn Db) -> Self {
+        Self {
+            subclass_of: self.subclass_of.normalized(db),
         }
     }
 
@@ -135,6 +176,20 @@ impl<'db> SubclassOfInner<'db> {
         match self {
             Self::Class(class) => Some(class),
             Self::Dynamic(_) => None,
+        }
+    }
+
+    pub(crate) const fn into_dynamic(self) -> Option<DynamicType> {
+        match self {
+            Self::Class(_) => None,
+            Self::Dynamic(dynamic) => Some(dynamic),
+        }
+    }
+
+    pub(crate) fn normalized(self, db: &'db dyn Db) -> Self {
+        match self {
+            Self::Class(class) => Self::Class(class.normalized(db)),
+            Self::Dynamic(dynamic) => Self::Dynamic(dynamic.normalized()),
         }
     }
 
