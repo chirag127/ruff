@@ -1,5 +1,4 @@
-use ruff_diagnostics::{Diagnostic, Edit, Fix, FixAvailability, Violation};
-use ruff_macros::{derive_message_formats, ViolationMetadata};
+use ruff_macros::{ViolationMetadata, derive_message_formats};
 use ruff_python_ast::comparable::ComparableExpr;
 use ruff_python_ast::helpers::contains_effect;
 use ruff_python_ast::{
@@ -12,6 +11,7 @@ use ruff_text_size::{Ranged, TextRange};
 
 use crate::checkers::ast::Checker;
 use crate::fix::edits::fits;
+use crate::{Edit, Fix, FixAvailability, Violation};
 
 /// ## What it does
 /// Checks for `if` statements that can be replaced with `dict.get` calls.
@@ -82,11 +82,13 @@ pub(crate) fn if_else_block_instead_of_dict_get(checker: &Checker, stmt_if: &ast
     let [body_stmt] = body.as_slice() else {
         return;
     };
-    let [ElifElseClause {
-        body: else_body,
-        test: None,
-        ..
-    }] = elif_else_clauses.as_slice()
+    let [
+        ElifElseClause {
+            body: else_body,
+            test: None,
+            ..
+        },
+    ] = elif_else_clauses.as_slice()
     else {
         return;
     };
@@ -121,6 +123,7 @@ pub(crate) fn if_else_block_instead_of_dict_get(checker: &Checker, stmt_if: &ast
         ops,
         comparators: test_dict,
         range: _,
+        node_index: _,
     }) = &**test
     else {
         return;
@@ -185,6 +188,7 @@ pub(crate) fn if_else_block_instead_of_dict_get(checker: &Checker, stmt_if: &ast
         attr: Identifier::new("get".to_string(), TextRange::default()),
         ctx: ExprContext::Load,
         range: TextRange::default(),
+        node_index: ruff_python_ast::AtomicNodeIndex::dummy(),
     };
     let node3 = ast::ExprCall {
         func: Box::new(node2.into()),
@@ -192,14 +196,17 @@ pub(crate) fn if_else_block_instead_of_dict_get(checker: &Checker, stmt_if: &ast
             args: Box::from([node1, node]),
             keywords: Box::from([]),
             range: TextRange::default(),
+            node_index: ruff_python_ast::AtomicNodeIndex::dummy(),
         },
         range: TextRange::default(),
+        node_index: ruff_python_ast::AtomicNodeIndex::dummy(),
     };
     let node4 = expected_var.clone();
     let node5 = ast::StmtAssign {
         targets: vec![node4],
         value: Box::new(node3.into()),
         range: TextRange::default(),
+        node_index: ruff_python_ast::AtomicNodeIndex::dummy(),
     };
     let contents = checker.generator().stmt(&node5.into());
 
@@ -214,7 +221,7 @@ pub(crate) fn if_else_block_instead_of_dict_get(checker: &Checker, stmt_if: &ast
         return;
     }
 
-    let mut diagnostic = Diagnostic::new(
+    let mut diagnostic = checker.report_diagnostic(
         IfElseBlockInsteadOfDictGet {
             contents: contents.clone(),
         },
@@ -229,7 +236,6 @@ pub(crate) fn if_else_block_instead_of_dict_get(checker: &Checker, stmt_if: &ast
             stmt_if.range(),
         )));
     }
-    checker.report_diagnostic(diagnostic);
 }
 
 /// SIM401
@@ -245,6 +251,7 @@ pub(crate) fn if_exp_instead_of_dict_get(
         ops,
         comparators: test_dict,
         range: _,
+        node_index: _,
     }) = test
     else {
         return;
@@ -290,6 +297,7 @@ pub(crate) fn if_exp_instead_of_dict_get(
         attr: Identifier::new("get".to_string(), TextRange::default()),
         ctx: ExprContext::Load,
         range: TextRange::default(),
+        node_index: ruff_python_ast::AtomicNodeIndex::dummy(),
     };
     let fixed_node = ast::ExprCall {
         func: Box::new(dict_get_node.into()),
@@ -297,13 +305,15 @@ pub(crate) fn if_exp_instead_of_dict_get(
             args: Box::from([dict_key_node, default_value_node]),
             keywords: Box::from([]),
             range: TextRange::default(),
+            node_index: ruff_python_ast::AtomicNodeIndex::dummy(),
         },
         range: TextRange::default(),
+        node_index: ruff_python_ast::AtomicNodeIndex::dummy(),
     };
 
     let contents = checker.generator().expr(&fixed_node.into());
 
-    let mut diagnostic = Diagnostic::new(
+    let mut diagnostic = checker.report_diagnostic(
         IfElseBlockInsteadOfDictGet {
             contents: contents.clone(),
         },
@@ -318,5 +328,4 @@ pub(crate) fn if_exp_instead_of_dict_get(
             expr.range(),
         )));
     }
-    checker.report_diagnostic(diagnostic);
 }

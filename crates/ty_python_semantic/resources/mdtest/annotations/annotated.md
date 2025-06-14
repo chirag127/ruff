@@ -47,7 +47,7 @@ def _(flag: bool):
 def _(x: Annotated | bool):
     reveal_type(x)  # revealed: Unknown | bool
 
-# error: [invalid-type-form]
+# error: [invalid-type-form] "Special form `typing.Annotated` expected at least 2 arguments (one type and at least one metadata element)"
 def _(x: Annotated[()]):
     reveal_type(x)  # revealed: Unknown
 
@@ -76,7 +76,7 @@ from typing_extensions import Annotated
 class C(Annotated[int, "foo"]): ...
 
 # TODO: Should be `tuple[Literal[C], Literal[int], Literal[object]]`
-reveal_type(C.__mro__)  # revealed: tuple[Literal[C], @Todo(Inference of subscript on special form), Literal[object]]
+reveal_type(C.__mro__)  # revealed: tuple[<class 'C'>, @Todo(Inference of subscript on special form), <class 'object'>]
 ```
 
 ### Not parameterized
@@ -88,5 +88,5 @@ from typing_extensions import Annotated
 # error: [invalid-base]
 class C(Annotated): ...
 
-reveal_type(C.__mro__)  # revealed: tuple[Literal[C], Unknown, Literal[object]]
+reveal_type(C.__mro__)  # revealed: tuple[<class 'C'>, Unknown, <class 'object'>]
 ```

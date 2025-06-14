@@ -230,6 +230,7 @@ impl<'de> serde::de::Deserialize<'de> for NameImports {
                         names,
                         level,
                         range: _,
+                        node_index: _,
                     }) => names
                         .iter()
                         .map(|name| {
@@ -243,7 +244,11 @@ impl<'de> serde::de::Deserialize<'de> for NameImports {
                             })
                         })
                         .collect(),
-                    Stmt::Import(ast::StmtImport { names, range: _ }) => names
+                    Stmt::Import(ast::StmtImport {
+                        names,
+                        range: _,
+                        node_index: _,
+                    }) => names
                         .iter()
                         .map(|name| {
                             NameImport::Import(ModuleNameImport {
@@ -273,7 +278,7 @@ impl schemars::JsonSchema for NameImports {
         "NameImports".to_string()
     }
 
-    fn json_schema(_gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(_gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             instance_type: Some(schemars::schema::InstanceType::String.into()),
             ..Default::default()

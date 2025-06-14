@@ -19,8 +19,8 @@ use walk_directory::WalkDirectoryBuilder;
 use crate::file_revision::FileRevision;
 
 pub use self::path::{
-    deduplicate_nested_paths, DeduplicatedNestedPathsIter, SystemPath, SystemPathBuf,
-    SystemVirtualPath, SystemVirtualPathBuf,
+    DeduplicatedNestedPathsIter, SystemPath, SystemPathBuf, SystemVirtualPath,
+    SystemVirtualPathBuf, deduplicate_nested_paths,
 };
 
 mod memory_fs;
@@ -167,9 +167,24 @@ pub trait System: Debug {
         &self,
         pattern: &str,
     ) -> std::result::Result<
-        Box<dyn Iterator<Item = std::result::Result<SystemPathBuf, GlobError>>>,
+        Box<dyn Iterator<Item = std::result::Result<SystemPathBuf, GlobError>> + '_>,
         PatternError,
     >;
+
+    /// Fetches the environment variable `key` from the current process.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`std::env::VarError::NotPresent`] if:
+    /// - The variable is not set.
+    /// - The variable's name contains an equal sign or NUL (`'='` or `'\0'`).
+    ///
+    /// Returns [`std::env::VarError::NotUnicode`] if the variable's value is not valid
+    /// Unicode.
+    fn env_var(&self, name: &str) -> std::result::Result<String, std::env::VarError> {
+        let _ = name;
+        Err(std::env::VarError::NotPresent)
+    }
 
     fn as_any(&self) -> &dyn std::any::Any;
 
