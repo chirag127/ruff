@@ -6,11 +6,10 @@ use std::fmt::Display;
 
 use itertools::Itertools;
 use ruff_python_ast::{
-    self as ast,
+    self as ast, Arguments, Expr, ExprCall, ExprName, ExprSubscript, Identifier, Stmt, StmtAssign,
+    TypeParam, TypeParamParamSpec, TypeParamTypeVar, TypeParamTypeVarTuple,
     name::Name,
     visitor::{self, Visitor},
-    Arguments, Expr, ExprCall, ExprName, ExprSubscript, Identifier, Stmt, StmtAssign, TypeParam,
-    TypeParamParamSpec, TypeParamTypeVar, TypeParamTypeVarTuple,
 };
 use ruff_python_semantic::SemanticModel;
 use ruff_text_size::{Ranged, TextRange};
@@ -141,12 +140,14 @@ impl<'a> From<&'a TypeVar<'a>> for TypeParam {
             TypeParamKind::TypeVar => {
                 TypeParam::TypeVar(TypeParamTypeVar {
                     range: TextRange::default(),
+                    node_index: ruff_python_ast::AtomicNodeIndex::dummy(),
                     name: Identifier::new(*name, TextRange::default()),
                     bound: match restriction {
                         Some(TypeVarRestriction::Bound(bound)) => Some(Box::new((*bound).clone())),
                         Some(TypeVarRestriction::Constraint(constraints)) => {
                             Some(Box::new(Expr::Tuple(ast::ExprTuple {
                                 range: TextRange::default(),
+                                node_index: ruff_python_ast::AtomicNodeIndex::dummy(),
                                 elts: constraints.iter().map(|expr| (*expr).clone()).collect(),
                                 ctx: ast::ExprContext::Load,
                                 parenthesized: true,
@@ -155,14 +156,17 @@ impl<'a> From<&'a TypeVar<'a>> for TypeParam {
                         Some(TypeVarRestriction::AnyStr) => {
                             Some(Box::new(Expr::Tuple(ast::ExprTuple {
                                 range: TextRange::default(),
+                                node_index: ruff_python_ast::AtomicNodeIndex::dummy(),
                                 elts: vec![
                                     Expr::Name(ExprName {
                                         range: TextRange::default(),
+                                        node_index: ruff_python_ast::AtomicNodeIndex::dummy(),
                                         id: Name::from("str"),
                                         ctx: ast::ExprContext::Load,
                                     }),
                                     Expr::Name(ExprName {
                                         range: TextRange::default(),
+                                        node_index: ruff_python_ast::AtomicNodeIndex::dummy(),
                                         id: Name::from("bytes"),
                                         ctx: ast::ExprContext::Load,
                                     }),
@@ -180,11 +184,13 @@ impl<'a> From<&'a TypeVar<'a>> for TypeParam {
             }
             TypeParamKind::TypeVarTuple => TypeParam::TypeVarTuple(TypeParamTypeVarTuple {
                 range: TextRange::default(),
+                node_index: ruff_python_ast::AtomicNodeIndex::dummy(),
                 name: Identifier::new(*name, TextRange::default()),
                 default: None,
             }),
             TypeParamKind::ParamSpec => TypeParam::ParamSpec(TypeParamParamSpec {
                 range: TextRange::default(),
+                node_index: ruff_python_ast::AtomicNodeIndex::dummy(),
                 name: Identifier::new(*name, TextRange::default()),
                 default: None,
             }),
@@ -282,7 +288,7 @@ pub(crate) fn expr_name_to_type_var<'a>(
 
     match value.as_ref() {
         Expr::Subscript(ExprSubscript {
-            value: ref subscript_value,
+            value: subscript_value,
             ..
         }) => {
             if semantic.match_typing_expr(subscript_value, "TypeVar") {

@@ -1,14 +1,16 @@
 use crate::config::Log;
+use crate::db::Db;
 use crate::parser::{BacktickOffsets, EmbeddedFileSourceMap};
 use camino::Utf8Path;
 use colored::Colorize;
 use config::SystemKind;
 use parser as test_parser;
+use ruff_db::Upcast;
 use ruff_db::diagnostic::{
-    create_parse_diagnostic, create_unsupported_syntax_diagnostic, Diagnostic,
-    DisplayDiagnosticConfig,
+    Diagnostic, DisplayDiagnosticConfig, create_parse_diagnostic,
+    create_unsupported_syntax_diagnostic,
 };
-use ruff_db::files::{system_path_to_file, File};
+use ruff_db::files::{File, system_path_to_file};
 use ruff_db::panic::catch_unwind;
 use ruff_db::parsed::parsed_module;
 use ruff_db::system::{DbWithWritableSystem as _, SystemPath, SystemPathBuf};
@@ -16,9 +18,11 @@ use ruff_db::testing::{setup_logging, setup_logging_with_filter};
 use ruff_source_file::{LineIndex, OneIndexed};
 use std::backtrace::BacktraceStatus;
 use std::fmt::Write;
+use ty_python_semantic::pull_types::pull_types;
 use ty_python_semantic::types::check_types;
 use ty_python_semantic::{
-    Program, ProgramSettings, PythonPath, PythonPlatform, SearchPathSettings, SysPrefixPathOrigin,
+    Program, ProgramSettings, PythonPath, PythonPlatform, PythonVersionSource,
+    PythonVersionWithSource, SearchPathSettings, SysPrefixPathOrigin,
 };
 
 mod assertion;
@@ -55,7 +59,10 @@ pub fn run(
     let filter = std::env::var(MDTEST_TEST_FILTER).ok();
     let mut any_failures = false;
     for test in suite.tests() {
-        if filter.as_ref().is_some_and(|f| !test.name().contains(f)) {
+        if filter
+            .as_ref()
+            .is_some_and(|f| !test.uncontracted_name().contains(f))
+        {
             continue;
         }
 
@@ -164,12 +171,10 @@ fn run_test(
 
     let src_path = project_root.clone();
     let custom_typeshed_path = test.configuration().typeshed();
-    let python_path = test.configuration().python();
     let python_version = test.configuration().python_version().unwrap_or_default();
 
     let mut typeshed_files = vec![];
     let mut has_custom_versions_file = false;
-    let mut has_custom_pyvenv_cfg_file = false;
 
     let test_files: Vec<_> = test
         .files()
@@ -185,38 +190,35 @@ fn run_test(
 
             let mut full_path = embedded.full_path(&project_root);
 
-            if let Some(typeshed_path) = custom_typeshed_path {
-                if let Ok(relative_path) = full_path.strip_prefix(typeshed_path.join("stdlib")) {
-                    if relative_path.as_str() == "VERSIONS" {
-                        has_custom_versions_file = true;
-                    } else if relative_path.extension().is_some_and(|ext| ext == "pyi") {
-                        typeshed_files.push(relative_path.to_path_buf());
-                    }
+            if let Some(relative_path_to_custom_typeshed) = custom_typeshed_path
+                .and_then(|typeshed| full_path.strip_prefix(typeshed.join("stdlib")).ok())
+            {
+                if relative_path_to_custom_typeshed.as_str() == "VERSIONS" {
+                    has_custom_versions_file = true;
+                } else if relative_path_to_custom_typeshed
+                    .extension()
+                    .is_some_and(|ext| ext == "pyi")
+                {
+                    typeshed_files.push(relative_path_to_custom_typeshed.to_path_buf());
                 }
-            } else if let Some(python_path) = python_path {
-                if let Ok(relative_path) = full_path.strip_prefix(python_path) {
-                    if relative_path.as_str() == "pyvenv.cfg" {
-                        has_custom_pyvenv_cfg_file = true;
-                    } else {
-                        let mut new_path = SystemPathBuf::new();
-                        for component in full_path.components() {
-                            let component = component.as_str();
-                            if component == "<path-to-site-packages>" {
-                                if cfg!(target_os = "windows") {
-                                    new_path.push("Lib");
-                                    new_path.push("site-packages");
-                                } else {
-                                    new_path.push("lib");
-                                    new_path.push(format!("python{python_version}"));
-                                    new_path.push("site-packages");
-                                }
-                            } else {
-                                new_path.push(component);
-                            }
-                        }
-                        full_path = new_path;
-                    }
+            } else if let Some(component_index) = full_path
+                .components()
+                .position(|c| c.as_str() == "<path-to-site-packages>")
+            {
+                // If the path contains `<path-to-site-packages>`, we need to replace it with the
+                // actual site-packages directory based on the Python platform and version.
+                let mut components = full_path.components();
+                let mut new_path: SystemPathBuf =
+                    components.by_ref().take(component_index).collect();
+                if cfg!(target_os = "windows") {
+                    new_path.extend(["Lib", "site-packages"]);
+                } else {
+                    new_path.push("lib");
+                    new_path.push(format!("python{python_version}"));
+                    new_path.push("site-packages");
                 }
+                new_path.extend(components.skip(1));
+                full_path = new_path;
             }
 
             db.write_file(&full_path, &embedded.code).unwrap();
@@ -255,20 +257,13 @@ fn run_test(
         }
     }
 
-    if let Some(python_path) = python_path {
-        if !has_custom_pyvenv_cfg_file {
-            let pyvenv_cfg_file = python_path.join("pyvenv.cfg");
-            let home_directory = SystemPathBuf::from(format!("/Python{python_version}"));
-            db.create_directory_all(&home_directory).unwrap();
-            db.write_file(&pyvenv_cfg_file, format!("home = {home_directory}"))
-                .unwrap();
-        }
-    }
-
     let configuration = test.configuration();
 
     let settings = ProgramSettings {
-        python_version,
+        python_version: Some(PythonVersionWithSource {
+            version: python_version,
+            source: PythonVersionSource::Cli,
+        }),
         python_platform: configuration
             .python_platform()
             .unwrap_or(PythonPlatform::Identifier("linux".to_string())),
@@ -279,7 +274,7 @@ fn run_test(
             python_path: configuration
                 .python()
                 .map(|sys_prefix| {
-                    PythonPath::SysPrefix(
+                    PythonPath::IntoSysPrefix(
                         sys_prefix.to_path_buf(),
                         SysPrefixPathOrigin::PythonCliFlag,
                     )
@@ -298,10 +293,32 @@ fn run_test(
     // all diagnostics. Otherwise it remains empty.
     let mut snapshot_diagnostics = vec![];
 
-    let failures: Failures = test_files
-        .into_iter()
+    let mut any_pull_types_failures = false;
+
+    let mut failures: Failures = test_files
+        .iter()
         .filter_map(|test_file| {
-            let parsed = parsed_module(db, test_file.file);
+            let pull_types_result = attempt_test(
+                db,
+                pull_types,
+                test_file,
+                "\"pull types\"",
+                Some(
+                    "Note: either fix the panic or add the `<!-- pull-types:skip -->` \
+                    directive to this test",
+                ),
+            );
+            match pull_types_result {
+                Ok(()) => {}
+                Err(failures) => {
+                    any_pull_types_failures = true;
+                    if !test.should_skip_pulling_types() {
+                        return Some(failures);
+                    }
+                }
+            }
+
+            let parsed = parsed_module(db, test_file.file).load(db);
 
             let mut diagnostics: Vec<Diagnostic> = parsed
                 .errors()
@@ -316,62 +333,49 @@ fn run_test(
                     .map(|error| create_unsupported_syntax_diagnostic(test_file.file, error)),
             );
 
-            let type_diagnostics = match catch_unwind(|| check_types(db, test_file.file)) {
-                Ok(type_diagnostics) => type_diagnostics,
-                Err(info) => {
-                    let mut by_line = matcher::FailuresByLine::default();
-                    let mut messages = vec![];
-                    match info.location {
-                        Some(location) => messages.push(format!("panicked at {location}")),
-                        None => messages.push("panicked at unknown location".to_string()),
-                    }
-                    match info.payload.as_str() {
-                        Some(message) => messages.push(message.to_string()),
-                        // Mimic the default panic hook's rendering of the panic payload if it's
-                        // not a string.
-                        None => messages.push("Box<dyn Any>".to_string()),
-                    }
-                    if let Some(backtrace) = info.backtrace {
-                        match backtrace.status() {
-                            BacktraceStatus::Disabled => {
-                                let msg = "run with `RUST_BACKTRACE=1` environment variable to display a backtrace";
-                                messages.push(msg.to_string());
-                            }
-                            BacktraceStatus::Captured => {
-                                messages.extend(backtrace.to_string().split('\n').map(String::from));
-                            }
-                            _ => {}
-                        }
-                    }
-
-                    if let Some(backtrace) = info.salsa_backtrace {
-                        salsa::attach(db, || {
-                            messages.extend(format!("{backtrace:#}").split('\n').map(String::from));
-                        });
-                    }
-
-                    by_line.push(OneIndexed::from_zero_indexed(0), messages);
-                    return Some(FileFailures {
-                        backtick_offsets: test_file.backtick_offsets,
-                        by_line,
-                    });
-                }
+            let mdtest_result = attempt_test(db, check_types, test_file, "run mdtest", None);
+            let type_diagnostics = match mdtest_result {
+                Ok(diagnostics) => diagnostics,
+                Err(failures) => return Some(failures),
             };
+
             diagnostics.extend(type_diagnostics.into_iter().cloned());
+            diagnostics.sort_by(|left, right| {
+                left.rendering_sort_key(db)
+                    .cmp(&right.rendering_sort_key(db))
+            });
 
             let failure = match matcher::match_file(db, test_file.file, &diagnostics) {
                 Ok(()) => None,
                 Err(line_failures) => Some(FileFailures {
-                    backtick_offsets: test_file.backtick_offsets,
+                    backtick_offsets: test_file.backtick_offsets.clone(),
                     by_line: line_failures,
                 }),
             };
             if test.should_snapshot_diagnostics() {
                 snapshot_diagnostics.extend(diagnostics);
             }
+
             failure
         })
         .collect();
+
+    if test.should_skip_pulling_types() && !any_pull_types_failures {
+        let mut by_line = matcher::FailuresByLine::default();
+        by_line.push(
+            OneIndexed::from_zero_indexed(0),
+            vec![
+                "Remove the `<!-- pull-types:skip -->` directive from this test: pulling types \
+                 succeeded for all files in the test."
+                    .to_string(),
+            ],
+        );
+        let failure = FileFailures {
+            backtick_offsets: test_files[0].backtick_offsets.clone(),
+            by_line,
+        };
+        failures.push(failure);
+    }
 
     if snapshot_diagnostics.is_empty() && test.should_snapshot_diagnostics() {
         panic!(
@@ -430,7 +434,7 @@ fn create_diagnostic_snapshot(
     let mut snapshot = String::new();
     writeln!(snapshot).unwrap();
     writeln!(snapshot, "---").unwrap();
-    writeln!(snapshot, "mdtest name: {}", test.name()).unwrap();
+    writeln!(snapshot, "mdtest name: {}", test.uncontracted_name()).unwrap();
     writeln!(snapshot, "mdtest path: {relative_fixture_path}").unwrap();
     writeln!(snapshot, "---").unwrap();
     writeln!(snapshot).unwrap();
@@ -463,8 +467,76 @@ fn create_diagnostic_snapshot(
             writeln!(snapshot).unwrap();
         }
         writeln!(snapshot, "```").unwrap();
-        write!(snapshot, "{}", diag.display(db, &display_config)).unwrap();
+        write!(snapshot, "{}", diag.display(&db.upcast(), &display_config)).unwrap();
         writeln!(snapshot, "```").unwrap();
     }
     snapshot
+}
+
+/// Run a function over an embedded test file, catching any panics that occur in the process.
+///
+/// If no panic occurs, the result of the function is returned as an `Ok()` variant.
+///
+/// If a panic occurs, a nicely formatted [`FileFailures`] is returned as an `Err()` variant.
+/// This will be formatted into a diagnostic message by `ty_test`.
+fn attempt_test<'db, T, F>(
+    db: &'db Db,
+    test_fn: F,
+    test_file: &TestFile,
+    action: &str,
+    clarification: Option<&str>,
+) -> Result<T, FileFailures>
+where
+    F: FnOnce(&'db dyn ty_python_semantic::Db, File) -> T + std::panic::UnwindSafe,
+{
+    catch_unwind(|| test_fn(db, test_file.file)).map_err(|info| {
+        let mut by_line = matcher::FailuresByLine::default();
+        let mut messages = vec![];
+        match info.location {
+            Some(location) => messages.push(format!(
+                "Attempting to {action} caused a panic at {location}"
+            )),
+            None => messages.push(format!(
+                "Attempting to {action} caused a panic at an unknown location",
+            )),
+        }
+        if let Some(clarification) = clarification {
+            messages.push(clarification.to_string());
+        }
+        messages.push(String::new());
+        match info.payload.as_str() {
+            Some(message) => messages.push(message.to_string()),
+            // Mimic the default panic hook's rendering of the panic payload if it's
+            // not a string.
+            None => messages.push("Box<dyn Any>".to_string()),
+        }
+        messages.push(String::new());
+
+        if let Some(backtrace) = info.backtrace {
+            match backtrace.status() {
+                BacktraceStatus::Disabled => {
+                    let msg =
+                        "run with `RUST_BACKTRACE=1` environment variable to display a backtrace";
+                    messages.push(msg.to_string());
+                }
+                BacktraceStatus::Captured => {
+                    messages.extend(backtrace.to_string().split('\n').map(String::from));
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(backtrace) = info.salsa_backtrace {
+            salsa::attach(db, || {
+                messages.extend(format!("{backtrace:#}").split('\n').map(String::from));
+            });
+        }
+
+        by_line.push(OneIndexed::from_zero_indexed(0), messages);
+
+        FileFailures {
+            backtick_offsets: test_file.backtick_offsets.clone(),
+            by_line,
+        }
+    })
 }

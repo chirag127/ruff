@@ -1,19 +1,24 @@
 use crate::logging::Verbosity;
 use crate::python_version::PythonVersion;
+use clap::error::ErrorKind;
 use clap::{ArgAction, ArgMatches, Error, Parser};
 use ruff_db::system::SystemPathBuf;
-use ty_project::metadata::options::{EnvironmentOptions, Options, TerminalOptions};
-use ty_project::metadata::value::{RangedValue, RelativePathBuf};
+use ty_project::combine::Combine;
+use ty_project::metadata::options::{EnvironmentOptions, Options, SrcOptions, TerminalOptions};
+use ty_project::metadata::value::{
+    RangedValue, RelativeExcludePattern, RelativePathBuf, ValueSource,
+};
 use ty_python_semantic::lint;
 
 #[derive(Debug, Parser)]
 #[command(author, name = "ty", about = "An extremely fast Python type checker.")]
-#[command(version)]
-pub(crate) struct Args {
+#[command(long_version = crate::version::version())]
+pub struct Cli {
     #[command(subcommand)]
     pub(crate) command: Command,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, clap::Subcommand)]
 pub(crate) enum Command {
     /// Check a project for type errors.
@@ -24,6 +29,10 @@ pub(crate) enum Command {
 
     /// Display ty's version
     Version,
+
+    /// Generate shell completion
+    #[clap(hide = true)]
+    GenerateShellCompletion { shell: clap_complete_command::Shell },
 }
 
 #[derive(Debug, Parser)]
@@ -44,14 +53,21 @@ pub(crate) struct CheckCommand {
     #[arg(long, value_name = "PROJECT")]
     pub(crate) project: Option<SystemPathBuf>,
 
-    /// Path to the Python installation from which ty resolves type information and third-party dependencies.
+    /// Path to the Python environment.
     ///
-    /// If not specified, ty will look at the `VIRTUAL_ENV` environment variable.
+    /// ty uses the Python environment to resolve type information and third-party dependencies.
     ///
-    /// ty will search in the path's `site-packages` directories for type information and
-    /// third-party imports.
+    /// If not specified, ty will attempt to infer it from the `VIRTUAL_ENV` or `CONDA_PREFIX`
+    /// environment variables, or discover a `.venv` directory in the project root or working
+    /// directory.
     ///
-    /// This option is commonly used to specify the path to a virtual environment.
+    /// If a path to a Python interpreter is provided, e.g., `.venv/bin/python3`, ty will attempt to
+    /// find an environment two directories up from the interpreter's path, e.g., `.venv`. At this
+    /// time, ty does not invoke the interpreter to determine the location of the environment. This
+    /// means that ty will not resolve dynamic executables such as a shim.
+    ///
+    /// ty will search in the resolved environment's `site-packages` directories for type
+    /// information and third-party imports.
     #[arg(long, value_name = "PATH")]
     pub(crate) python: Option<SystemPathBuf>,
 
@@ -64,6 +80,17 @@ pub(crate) struct CheckCommand {
     pub(crate) extra_search_path: Option<Vec<SystemPathBuf>>,
 
     /// Python version to assume when resolving types.
+    ///
+    /// The Python version affects allowed syntax, type definitions of the standard library, and
+    /// type definitions of first- and third-party modules that are conditional on the Python version.
+    ///
+    /// If a version is not specified on the command line or in a configuration file,
+    /// ty will try the following techniques in order of preference to determine a value:
+    /// 1. Check for the `project.requires-python` setting in a `pyproject.toml` file
+    ///    and use the minimum version from the specified range
+    /// 2. Check for an activated or configured Python environment
+    ///    and attempt to infer the Python version of that environment
+    /// 3. Fall back to the latest stable Python version supported by ty (currently Python 3.13)
     #[arg(long, value_name = "VERSION", alias = "target-version")]
     pub(crate) python_version: Option<PythonVersion>,
 
@@ -81,6 +108,15 @@ pub(crate) struct CheckCommand {
 
     #[clap(flatten)]
     pub(crate) rules: RulesArg,
+
+    #[clap(flatten)]
+    pub(crate) config: ConfigsArg,
+
+    /// The path to a `ty.toml` file to use for configuration.
+    ///
+    /// While ty configuration can be included in a `pyproject.toml` file, it is not allowed in this context.
+    #[arg(long, env = "TY_CONFIG_FILE", value_name = "PATH")]
+    pub(crate) config_file: Option<SystemPathBuf>,
 
     /// The format to use for printing diagnostic messages.
     #[arg(long)]
@@ -114,6 +150,13 @@ pub(crate) struct CheckCommand {
     respect_ignore_files: Option<bool>,
     #[clap(long, overrides_with("respect_ignore_files"), hide = true)]
     no_respect_ignore_files: bool,
+
+    /// Glob patterns for files to exclude from type checking.
+    ///
+    /// Uses gitignore-style syntax to exclude files and directories from type checking.
+    /// Supports patterns like `tests/`, `*.tmp`, `**/__pycache__/**`.
+    #[arg(long, help_heading = "File selection")]
+    exclude: Option<Vec<String>>,
 }
 
 impl CheckCommand {
@@ -136,7 +179,7 @@ impl CheckCommand {
             .no_respect_ignore_files
             .then_some(false)
             .or(self.respect_ignore_files);
-        Options {
+        let options = Options {
             environment: Some(EnvironmentOptions {
                 python_version: self
                     .python_version
@@ -159,10 +202,23 @@ impl CheckCommand {
                     .map(|output_format| RangedValue::cli(output_format.into())),
                 error_on_warning: self.error_on_warning,
             }),
+            src: Some(SrcOptions {
+                respect_ignore_files,
+                exclude: self.exclude.map(|excludes| {
+                    RangedValue::cli(
+                        excludes
+                            .iter()
+                            .map(|exclude| RelativeExcludePattern::cli(exclude))
+                            .collect(),
+                    )
+                }),
+                ..SrcOptions::default()
+            }),
             rules,
-            respect_ignore_files,
-            ..Default::default()
-        }
+            ..Options::default()
+        };
+        // Merge with options passed in via --config
+        options.combine(self.config.into_options().unwrap_or_default())
     }
 }
 
@@ -256,7 +312,7 @@ impl clap::Args for RulesArg {
 /// The diagnostic output format.
 #[derive(Copy, Clone, Hash, Debug, PartialEq, Eq, PartialOrd, Ord, Default, clap::ValueEnum)]
 pub enum OutputFormat {
-    /// Print diagnostics verbosely, with context and helpful hints.
+    /// Print diagnostics verbosely, with context and helpful hints \[default\].
     ///
     /// Diagnostic messages may include additional context and
     /// annotations on the input to help understand the message.
@@ -294,4 +350,66 @@ pub(crate) enum TerminalColor {
 
     /// Never display colors.
     Never,
+}
+
+/// A TOML `<KEY> = <VALUE>` pair
+/// (such as you might find in a `ty.toml` configuration file)
+/// overriding a specific configuration option.
+///
+/// Overrides of individual settings using this option always take precedence
+/// over all configuration files.
+#[derive(Debug, Clone)]
+pub(crate) struct ConfigsArg(Option<Options>);
+
+impl clap::FromArgMatches for ConfigsArg {
+    fn from_arg_matches(matches: &ArgMatches) -> Result<Self, Error> {
+        let combined = matches
+            .get_many::<String>("config")
+            .into_iter()
+            .flatten()
+            .map(|s| {
+                Options::from_toml_str(s, ValueSource::Cli)
+                    .map_err(|err| Error::raw(ErrorKind::InvalidValue, err.to_string()))
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .reduce(|acc, item| item.combine(acc));
+        Ok(Self(combined))
+    }
+
+    fn update_from_arg_matches(&mut self, matches: &ArgMatches) -> Result<(), Error> {
+        self.0 = Self::from_arg_matches(matches)?.0;
+        Ok(())
+    }
+}
+
+impl clap::Args for ConfigsArg {
+    fn augment_args(cmd: clap::Command) -> clap::Command {
+        cmd.arg(
+            clap::Arg::new("config")
+                .short('c')
+                .long("config")
+                .value_name("CONFIG_OPTION")
+                .help("A TOML `<KEY> = <VALUE>` pair overriding a specific configuration option.")
+                .long_help(
+                    "
+A TOML `<KEY> = <VALUE>` pair (such as you might find in a `ty.toml` configuration file)
+overriding a specific configuration option.
+
+Overrides of individual settings using this option always take precedence
+over all configuration files.",
+                )
+                .action(ArgAction::Append),
+        )
+    }
+
+    fn augment_args_for_update(cmd: clap::Command) -> clap::Command {
+        Self::augment_args(cmd)
+    }
+}
+
+impl ConfigsArg {
+    pub(crate) fn into_options(self) -> Option<Options> {
+        self.0
+    }
 }

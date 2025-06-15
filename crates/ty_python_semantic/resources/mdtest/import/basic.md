@@ -6,7 +6,7 @@
 from b import C as D
 
 E = D
-reveal_type(E)  # revealed: Literal[C]
+reveal_type(E)  # revealed: <class 'C'>
 ```
 
 `b.py`:
@@ -21,7 +21,7 @@ class C: ...
 import b
 
 D = b.C
-reveal_type(D)  # revealed: Literal[C]
+reveal_type(D)  # revealed: <class 'C'>
 ```
 
 `b.py`:
@@ -35,7 +35,7 @@ class C: ...
 ```py
 import a.b
 
-reveal_type(a.b.C)  # revealed: Literal[C]
+reveal_type(a.b.C)  # revealed: <class 'C'>
 ```
 
 `a/__init__.py`:
@@ -54,7 +54,7 @@ class C: ...
 ```py
 import a.b.c
 
-reveal_type(a.b.c.C)  # revealed: Literal[C]
+reveal_type(a.b.c.C)  # revealed: <class 'C'>
 ```
 
 `a/__init__.py`:
@@ -78,7 +78,7 @@ class C: ...
 ```py
 import a.b as b
 
-reveal_type(b.C)  # revealed: Literal[C]
+reveal_type(b.C)  # revealed: <class 'C'>
 ```
 
 `a/__init__.py`:
@@ -97,7 +97,7 @@ class C: ...
 ```py
 import a.b.c as c
 
-reveal_type(c.C)  # revealed: Literal[C]
+reveal_type(c.C)  # revealed: <class 'C'>
 ```
 
 `a/__init__.py`:
@@ -175,4 +175,33 @@ emitted for the `import from` statement:
 ```py
 # error: [unresolved-import]
 from does_not_exist import foo, bar, baz
+```
+
+## Attempting to import a stdlib module that's not yet been added
+
+<!-- snapshot-diagnostics -->
+
+```toml
+[environment]
+python-version = "3.10"
+```
+
+```py
+import tomllib  # error: [unresolved-import]
+from string.templatelib import Template  # error: [unresolved-import]
+from importlib.resources import abc  # error: [unresolved-import]
+```
+
+## Attempting to import a stdlib module that was previously removed
+
+<!-- snapshot-diagnostics -->
+
+```toml
+[environment]
+python-version = "3.13"
+```
+
+```py
+import aifc  # error: [unresolved-import]
+from distutils import sysconfig  # error: [unresolved-import]
 ```
